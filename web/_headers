@@ -1,0 +1,9 @@
+# wasm 内容寻址文件名 → 长缓存
+/msdos_bg.*.wasm
+  Cache-Control: public, max-age=31536000, immutable
+/msdos.js
+  Cache-Control: no-cache
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache

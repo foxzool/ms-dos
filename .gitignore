@@ -1,0 +1,11 @@
+/target
+/web/*
+!/web/index.html
+!/_headers
+!/web/_headers
+!/web/404.html
+data/*.osm
+.playwright-mcp/
+.wrangler/
+*.png
+!docs/*.png

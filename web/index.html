@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>MiaoSuan Decision Optimization System</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0b0e12; overflow: hidden; }
+  #app { width: 100%; height: 100%; }
+  #msdos-canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+  #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+             color: #61a5ff; font: 14px monospace; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="app"><canvas id="msdos-canvas"></canvas></div>
+<div id="loading">LOADING MIAOSUAN DOS…</div>
+<script type="module">
+  import init from './msdos.js?v=c5b83a4f';
+  init({ module_or_path: './msdos_bg.c5b83a4f.wasm' })
+    .then(() => { document.getElementById('loading').style.display = 'none'; })
+    .catch(e => {
+      document.getElementById('loading').textContent = '加载失败: ' + e;
+      console.error(e);
+    });
+  // 阻止右键菜单弹出（右键是“落入地图”指令）
+  document.getElementById('msdos-canvas').addEventListener('contextmenu', e => e.preventDefault());
+</script>
+</body>
+</html>
