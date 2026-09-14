@@ -250,6 +250,7 @@ pub fn update_ui(
     mut zones: ResMut<UiHitZones>,
     app_state: Res<State<AppState>>,
     tiles: Option<Res<crate::tiles::TileCache>>,
+    sat_layer: Option<Res<crate::satellites::SatLayer>>,
 ) {
     // ---- 按钮点击（即时处理，不节流） ----
     let (win_w, win_h) = window
@@ -272,7 +273,15 @@ pub fn update_ui(
             format!("x{}", TIME_SPEEDS[clock.speed_idx])
         };
         let mode_tag = if *app_state.get() == AppState::Globe { "GLOBE" } else { "MAP" };
-        t.0 = format!("{}  {}  {}", clock.format(), speed, mode_tag);
+        let sat_tag = if *app_state.get() == AppState::Globe {
+            match sat_layer {
+                Some(l) => format!("  SAT {} {}", if l.visible { "ON" } else { "OFF" }, l.sat_count()),
+                None => String::new(),
+            }
+        } else {
+            String::new()
+        };
+        t.0 = format!("{}  {}  {}{}", clock.format(), speed, mode_tag, sat_tag);
     }
 
     // 按钮高亮

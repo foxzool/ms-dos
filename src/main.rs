@@ -12,6 +12,7 @@ mod input;
 mod map_render;
 mod mvt;
 mod osm;
+mod satellites;
 mod sim;
 mod tiles;
 mod units_render;
@@ -255,9 +256,14 @@ fn main() {
                 .run_if(in_state(globe::AppState::Globe)),
         )
         .init_resource::<globe_tiles::GlobeTileCache>()
+        .init_resource::<satellites::SatLayer>()
         .add_systems(
             Update,
             globe_tiles::globe_tile_system.run_if(in_state(globe::AppState::Globe)),
+        )
+        .add_systems(
+            Update,
+            satellites::sat_stream_system.run_if(in_state(globe::AppState::Globe)),
         )
         .add_systems(Update, globe::map_takeoff.run_if(in_state(globe::AppState::Map)))
         .add_systems(
