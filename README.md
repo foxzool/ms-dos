@@ -15,7 +15,7 @@
 
 | 领域 | 能力 |
 | --- | --- |
-| 地球 | 自生成等距圆柱 UV 球体（贴图与经纬度严格对齐）、暗色战略地球（NASA Blue Marble）；单位以战略标记同步到球面（遵循战争迷雾），OSM 数据区以黄色点环标示 |
+| 地球 | 自生成等距圆柱 UV 球体（贴图与经纬度严格对齐）、暗色战略地球（Natural Earth III 贴图）；单位以战略标记同步到球面（遵循战争迷雾），OSM 数据区以黄色点环标示 |
 | 地球↔地图 | 视角连续性切换：地表视距 ↔ 米/像素 可逆换算，地球推进越过阈值直接落入地图（保持缩放手感连续），地图缩放到极限自动升轨；`G` 键随时互切 |
 | 实时地图 | **OpenFreeMap 矢量瓦片**（OpenMapTiles schema 的 MVT，免费无 key、CORS 全开）：Web Mercator XYZ 瓦片按需下载，zoom 随视野米/像素自动加深（z6–z14）；URL 模板启动时从 TileJSON 动态获取（build 路径滚动更新）；手写 protobuf/MVT 解码器，图层映射复用桌面渲染管线；LRU 淘汰视口外瓦片并回收资产 |
 | 瓦片缓存 | 三级缓存：内存（本次会话，LRU 24 块）→ **磁盘**（`~/.cache/ms-dos/tiles/`，30 天 TTL，超 1 GiB 自动清理，仅桌面端）→ 网络；重启或 LRU 淘汰后再回该区域直接读盘 |
@@ -63,7 +63,7 @@ scripts/build-web.sh           # 构建 web 版（wasm + gzip 分发）
 scripts/build-web.sh --deploy  # 构建并部署到 Cloudflare Pages（需 wrangler login）
 ```
 
-Web 版平台适配：HTTP 客户端分流（桌面 ureq 阻塞式 / 浏览器 `fetch` + Promise→Future）、磁盘瓦片缓存仅在桌面端启用、地球贴图 `embedded_asset!` 内嵌进 wasm（免网络加载）。**体积优化**：Bevy feature 按需拼装（去掉 gltf/scene/picking/animation/反走样/后处理/手柄/sysinfo 等，约 -20%）+ `Tonemapping::None`（省 LUT 资产），wasm 22MB（< CF Pages 25MiB 单文件限制，原始直传），CF 边缘自动压缩后传输约 7.4MB。`npx wrangler pages project create ms-dos --production-branch main` 创建项目后即可部署。
+Web 版平台适配：HTTP 客户端分流（桌面 ureq 阻塞式 / 浏览器 `fetch` + Promise→Future）、磁盘瓦片缓存仅在桌面端启用、地球贴图 `embedded_asset!` 内嵌进 wasm（免网络加载）。**体积**：`Tonemapping::None`（省 LUT 资产），wasm 以 gzip 预压缩分发（约 9.4MB，绕过 CF Pages 25MiB 单文件限制，浏览器端 `DecompressionStream` 解压）。曾实验性裁剪 feature 至 22MB，因 UI 渲染回归已回退到完整 feature 组合。`npx wrangler pages project create ms-dos --production-branch main` 创建项目后即可部署。
 
 CLI 参数：
 
@@ -102,7 +102,8 @@ curl -s -o data/pearl_harbor.osm --data-urlencode "data@query.overpassql" \
 - **窗口截图管线依赖可呈现的窗口表面**：在无活跃显示会话（如远程/无头环境）中 `--screenshot` 输出黑图；桌面会话下正常。
 - v0.1 探测为确定性包络模型（无地形遮蔽、雷达视距、声呐会聚区）；红方对蓝方的探测只计算不呈现；武器仅展示。
 - 实时模式依赖 OpenFreeMap CDN 可用性（失败 20 秒自动重试；其瓦片 URL 的 build 路径会滚动更新，由 TileJSON 动态获取）；
-- Web 端为单线程 wasm：瓦片下载不阻塞，但解析/三角化在主线程同步执行（每块瓦片约有秒级卡顿，桌面端无此问题）；磁盘瓦片缓存仅桌面端；瓦片磁盘缓存可显著减少重复请求，也可手动预置缓存文件（`~/.cache/ms-dos/tiles/tile_{gx}_{gy}.xml`，0.1° 网格键）；单位在世界坐标下的 f32 表征在约 ±1.5m 精度，极高倍放大下可能有轻微量化（战术缩放级别无感）。
+- Web 端为单线程 wasm：瓦片下载不阻塞，但解析/三角化在主线程同步执行（每块瓦片约有秒级卡顿，桌面端无此问题）；磁盘瓦片缓存仅桌面端；
+- **Web 端 HUD 已知缺陷（Bevy 0.19 + WebGL2）**：地球态 HUD 不渲染，地图态仅文字渲染（面板背景缺失）；桌面版 HUD 完整正常。等待 Bevy 上游修复后跟进；瓦片磁盘缓存可显著减少重复请求，也可手动预置缓存文件（`~/.cache/ms-dos/tiles/tile_{gx}_{gy}.xml`，0.1° 网格键）；单位在世界坐标下的 f32 表征在约 ±1.5m 精度，极高倍放大下可能有轻微量化（战术缩放级别无感）。
 - multipolygon 只处理 outer/inner 环，不处理跨成员的复杂几何（对水域/绿地渲染影响很小）。
 
 ## 路线图
@@ -114,6 +115,18 @@ curl -s -o data/pearl_harbor.osm --data-urlencode "data@query.overpassql" \
 - [ ] `.osm.pbf` 支持与全球瓦片按需加载
 - [ ] 中文字体 HUD 与多想定脚本化（RON/JSON 想定文件）
 
-## 许可
+## 许可与第三方内容
 
-代码 MIT。地图数据遵循 ODbL（© OpenStreetMap contributors）。地球贴图来自 NASA Blue Marble（公有领域，经 three.js 示例资源分发）。
+**本项目代码**：MIT（见 [LICENSE](LICENSE)）。
+
+**声明**：本项目是独立的爱好者作品，受 CMO（Command: Modern Operations）启发的功能设计参考；与 Warfare Sims、Matrix Games 或 Slitherine 无关联，也未获其授权或背书。"Command: Modern Operations" 是其 respective owners 的商标，此处仅为描述性引用。
+
+| 内容 | 许可 | 来源 |
+| --- | --- | --- |
+| 地图数据（运行时瓦片） | [ODbL](https://opendatacommons.org/licenses/odbl/) | © OpenStreetMap contributors；瓦片来自 [OpenFreeMap](https://openfreemap.org)（© OpenMapTiles） |
+| 地球贴图 `assets/earth_2048.jpg` | 公有领域 | Natural Earth III by Tom Patterson ([shadedrelief.com](https://www.shadedrelief.com))，经 [three.js](https://github.com/mrdoob/three.js) examples 分发；[Natural Earth 条款](https://www.naturalearthdata.com/about/terms-of-use/) |
+| docs/ 截图 | 本项目 MIT（含上述公有领域贴图与 ODbL 数据的可视化，署名如下） | 自渲染 |
+| Rust 依赖（462 个） | MIT / Apache-2.0 / Unicode-3.0 / Zlib / ISC / BSD / CDLA-Permissive-2.0 等宽松许可，无 copyleft 组件 | `cargo metadata` 审计 |
+| 内嵌字体（Bevy default_font） | SIL OFL 1.1 | Fira 系列，由 Bevy 分发 |
+
+ODbL 署名同时显示在应用 HUD 右下角。静态备份 `data/pearl_harbor.osm`（不入库，可经 `scripts/fetch_map.sh` 获取）同为 © OpenStreetMap contributors（ODbL）。

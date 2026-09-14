@@ -183,6 +183,17 @@ pub fn build_ui(mut commands: Commands) {
         }
     });
 
+    // 地图数据署名（ODbL 与 OSM 瓦片使用准则要求）
+    commands.spawn((
+        text_node("(c) OpenStreetMap contributors", 10.0, Color::srgba(0.58, 0.63, 0.68, 0.85)),
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(10.0),
+            bottom: Val::Px(6.0),
+            ..Default::default()
+        },
+    ));
+
     commands.insert_resource(UiNodes {
         clock_text,
         contact_rows,

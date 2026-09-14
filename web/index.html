@@ -17,13 +17,20 @@
 <div id="app"><canvas id="msdos-canvas"></canvas></div>
 <div id="loading">LOADING MIAOSUAN DOS…</div>
 <script type="module">
-  import init from './msdos.js?v=c5b83a4f';
-  init({ module_or_path: './msdos_bg.c5b83a4f.wasm' })
-    .then(() => { document.getElementById('loading').style.display = 'none'; })
-    .catch(e => {
-      document.getElementById('loading').textContent = '加载失败: ' + e;
-      console.error(e);
-    });
+  import init from './msdos.js?v=4949cd6e';
+  // wasm 以 gzip 预压缩分发（绕过 CF Pages 25MiB 单文件限制），浏览器端解压
+  async function boot() {
+    const resp = await fetch('./msdos_bg.4949cd6e.wasm.gz');
+    if (!resp.ok) throw new Error('wasm 下载失败: HTTP ' + resp.status);
+    const ds = new DecompressionStream('gzip');
+    const inflated = await new Response(resp.body.pipeThrough(ds)).arrayBuffer();
+    await init(inflated);
+    document.getElementById('loading').style.display = 'none';
+  }
+  boot().catch(e => {
+    document.getElementById('loading').textContent = '加载失败: ' + e;
+    console.error(e);
+  });
   // 阻止右键菜单弹出（右键是“落入地图”指令）
   document.getElementById('msdos-canvas').addEventListener('contextmenu', e => e.preventDefault());
 </script>
