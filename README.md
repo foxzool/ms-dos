@@ -54,7 +54,7 @@ src/
 
 ## 构建与运行
 
-**Web 版（已部署在 Cloudflare Pages）：<https://ms-dos.pages.dev>**——地球起步、滚轮推进落入实时 OSM 地图，浏览器直连 Overpass API（CORS 由官方支持）。
+**Web 版：<https://ms-dos.zool.me>**（备用 <https://ms-dos.pages.dev>）——地球起步、滚轮推进落入实时 OSM 地图，浏览器直连 Overpass API（CORS 由官方支持）。
 
 ```bash
 cargo run --release            # 桌面交互模式（需要桌面会话）
