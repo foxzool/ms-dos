@@ -15,7 +15,7 @@
 
 | 领域 | 能力 |
 | --- | --- |
-| 地球 | 自生成等距圆柱 UV 球体（贴图与经纬度严格对齐）、暗色战略地球（Natural Earth III 贴图）；单位以战略标记同步到球面（遵循战争迷雾），OSM 数据区以黄色点环标示 |
+| 地球 | 球面贴图瓦片流（NASA GIBS Blue Marble 着色地形，z0-8 按视距分级、半球剔除、LRU 120 张、桌面磁盘缓存）+ 内嵌底图球兜底；单位以战略标记同步到球面（遵循战争迷雾），OSM 数据区以黄色点环标示 |
 | 地球↔地图 | 视角连续性切换：地表视距 ↔ 米/像素 可逆换算，地球推进越过阈值直接落入地图（保持缩放手感连续），地图缩放到极限自动升轨；`G` 键随时互切 |
 | 实时地图 | **OpenFreeMap 矢量瓦片**（OpenMapTiles schema 的 MVT，免费无 key、CORS 全开）：Web Mercator XYZ 瓦片按需下载，zoom 随视野米/像素自动加深（z6–z14）；URL 模板启动时从 TileJSON 动态获取（build 路径滚动更新）；手写 protobuf/MVT 解码器，图层映射复用桌面渲染管线；LRU 淘汰视口外瓦片并回收资产 |
 | 瓦片缓存 | 三级缓存：内存（本次会话，LRU 24 块）→ **磁盘**（`~/.cache/ms-dos/tiles/`，30 天 TTL，超 1 GiB 自动清理，仅桌面端）→ 网络；重启或 LRU 淘汰后再回该区域直接读盘 |
@@ -124,7 +124,8 @@ curl -s -o data/pearl_harbor.osm --data-urlencode "data@query.overpassql" \
 | 内容 | 许可 | 来源 |
 | --- | --- | --- |
 | 地图数据（运行时瓦片） | [ODbL](https://opendatacommons.org/licenses/odbl/) | © OpenStreetMap contributors；瓦片来自 [OpenFreeMap](https://openfreemap.org)（© OpenMapTiles） |
-| 地球贴图 `assets/earth_2048.jpg` | 公有领域 | Natural Earth III by Tom Patterson ([shadedrelief.com](https://www.shadedrelief.com))，经 [three.js](https://github.com/mrdoob/three.js) examples 分发；[Natural Earth 条款](https://www.naturalearthdata.com/about/terms-of-use/) |
+| 底图球贴图 `assets/earth_2048.jpg` | 公有领域 | Natural Earth III by Tom Patterson ([shadedrelief.com](https://www.shadedrelief.com))，经 [three.js](https://github.com/mrdoob/three.js) examples 分发；[Natural Earth 条款](https://www.naturalearthdata.com/about/terms-of-use/) |
+| 地球贴图瓦片（运行时） | 公有领域（NASA 政策） | [NASA GIBS](https://nasa-gibs.github.io/gibs-api-docs/) `BlueMarble_ShadedRelief_Bathymetry`，z0-8 WMTS/XYZ |
 | docs/ 截图 | 本项目 MIT（含上述公有领域贴图与 ODbL 数据的可视化，署名如下） | 自渲染 |
 | Rust 依赖（462 个） | MIT / Apache-2.0 / Unicode-3.0 / Zlib / ISC / BSD / CDLA-Permissive-2.0 等宽松许可，无 copyleft 组件 | `cargo metadata` 审计 |
 | 内嵌字体（Bevy default_font） | SIL OFL 1.1 | Fira 系列，由 Bevy 分发 |

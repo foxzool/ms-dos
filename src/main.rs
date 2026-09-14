@@ -7,6 +7,7 @@
 mod camera;
 mod geo;
 mod globe;
+mod globe_tiles;
 mod input;
 mod map_render;
 mod mvt;
@@ -243,6 +244,11 @@ fn main() {
                 .chain()
                 .run_if(in_state(globe::AppState::Globe)),
         )
+        .init_resource::<globe_tiles::GlobeTileCache>()
+        .add_systems(
+            Update,
+            globe_tiles::globe_tile_system.run_if(in_state(globe::AppState::Globe)),
+        )
         .add_systems(Update, globe::map_takeoff.run_if(in_state(globe::AppState::Map)))
         .add_systems(
             Update,
@@ -303,7 +309,7 @@ fn apply_url_view(
     if !size_ready {
         return;
     }
-    let Some(mut view) = url_view.as_deref_mut() else { *done = true; return };
+    let Some(view) = url_view.as_deref_mut() else { *done = true; return };
     let Some(v) = view.0.take() else { *done = true; return };
     let win_h = window.single().map(|w| w.height()).unwrap_or(900.0);
     match v {
@@ -430,7 +436,7 @@ fn setup_world(
             &mut commands,
             &mut meshes,
             &mut materials,
-            map_render::build_map_mesh(&map, &local, map_render::graticule_width_for_bounds((map.max.y - map.min.y))),
+            map_render::build_map_mesh(&map, &local, map_render::graticule_width_for_bounds(map.max.y - map.min.y)),
             origin,
             &shared,
         );
@@ -536,6 +542,7 @@ fn render_image_trigger(
     server: Res<AssetServer>,
     job: Option<Res<RenderImageJob>>,
     cache: Option<Res<tiles::TileCache>>,
+    globe_cache: Option<Res<globe_tiles::GlobeTileCache>>,
     live: Res<tiles::LiveMap>,
     mut frames: Local<u32>,
     mut stable: Local<u32>,
@@ -547,6 +554,11 @@ fn render_image_trigger(
         .as_ref()
         .map(|h| server.is_loaded_with_dependencies(h))
         .unwrap_or(true);
+    // 地球贴图瓦片模式：全球瓦片加载安定后再截
+    let globe_ready = globe_cache
+        .as_deref()
+        .map(|c| c.inflight == 0 && (c.loaded() >= c.capacity() || *frames > 900))
+        .unwrap_or(true);
     // 实时瓦片模式：加载完成且无在途请求需稳定 90 帧（约 1.5s），
     // 避免在请求节流的间隙（inflight 短暂归零）截图到半成品
     let tiles_ready = match (&cache, live.enabled) {
@@ -557,7 +569,7 @@ fn render_image_trigger(
         }
         _ => true,
     };
-    if *frames > 30 && asset_ready && tiles_ready {
+    if *frames > 30 && asset_ready && tiles_ready && globe_ready {
         commands
             .spawn(Readback::texture(job.handle.clone()))
             .observe(save_render_image);

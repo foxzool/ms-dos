@@ -217,31 +217,6 @@ pub(crate) fn polyline_strip(
     }
 }
 
-/// 单段线 → 四边形，返回起始顶点索引
-pub(crate) fn seg_quad(
-    a: &Vec2,
-    b: &Vec2,
-    width: f32,
-    verts: &mut Vec<[f32; 3]>,
-    idx: &mut Vec<u32>,
-) -> u32 {
-    let base = verts.len() as u32;
-    let dir = (*b - *a).normalize_or_zero();
-    if dir.length_squared() < 1e-8 {
-        return base;
-    }
-    let n = Vec2::new(-dir.y, dir.x) * (width * 0.5);
-    // 端点外延半宽，避免折线接缝出现缺口
-    let a = *a - dir * width * 0.5;
-    let b = *b + dir * width * 0.5;
-    verts.push([(a - n).x, (a - n).y, 0.0]);
-    verts.push([(a + n).x, (a + n).y, 0.0]);
-    verts.push([(b + n).x, (b + n).y, 0.0]);
-    verts.push([(b - n).x, (b - n).y, 0.0]);
-    // Mesh2d 管线 cull_mode: None（双面），单绕序即可
-    idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-    base
-}
 
 /// 经纬网（默认 0.05 度间隔，跨数据外接框外扩 20%）
 pub fn graticule_lines(map: &MapData, proj: &Projection, step_deg: f64, width_m: f32) -> Vec<Line> {
@@ -295,6 +270,7 @@ pub fn graticule_width_for_bounds(bounds_height_m: f32) -> f32 {
 /// 场景中的一层：颜色 + z 序 + 网格（可在任务线程构建，主线程生成实体）
 pub struct MapLayer {
     pub color: Color,
+    #[allow(dead_code)] // 顶点色合并后层级由追加序决定
     pub z: f32,
     pub mesh: Mesh,
 }
@@ -347,6 +323,7 @@ pub fn build_map_mesh(map: &MapData, proj: &Projection, graticule_width_m: f32) 
 pub struct SpawnedMapLayer {
     pub entity: Entity,
     pub mesh: Handle<Mesh>,
+    #[allow(dead_code)] // 共享材质不回收，保留供调试
     pub material: Handle<ColorMaterial>,
 }
 
@@ -355,7 +332,7 @@ pub struct SpawnedMapLayer {
 pub fn spawn_map_layers_at(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<ColorMaterial>,
+    _materials: &mut Assets<ColorMaterial>,
     mesh: Mesh,
     origin: Vec2,
     shared_material: &Handle<ColorMaterial>,

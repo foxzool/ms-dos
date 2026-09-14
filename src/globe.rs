@@ -154,6 +154,10 @@ pub struct DataRing {
 #[derive(Resource)]
 pub struct EarthTexture(pub Handle<bevy::image::Image>);
 
+/// 底图球实体标记（瓦片层就绪后隐藏，避免与 GIBS 瓦片混贴）
+#[derive(Component)]
+pub struct BaseGlobe;
+
 #[derive(Resource)]
 pub struct GlobeVisuals {
     pub marker_mesh: Handle<Mesh>,
@@ -180,12 +184,13 @@ pub fn setup_globe(
         cull_mode: None,
         ..default()
     });
-    let sphere = meshes.add(globe_sphere_mesh(GLOBE_RADIUS, 96, 48));
+    let sphere = meshes.add(globe_sphere_mesh(GLOBE_RADIUS * 0.985, 96, 48));
     commands.spawn((
         Mesh3d(sphere),
         MeshMaterial3d(earth_mat),
         Transform::default(),
         Visibility::default(),
+        BaseGlobe,
     ));
 
     let unlit = |c: Color| StandardMaterial { base_color: c, unlit: true, cull_mode: None, ..default() };

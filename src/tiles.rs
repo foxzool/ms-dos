@@ -236,6 +236,40 @@ fn load_cached(_k: TileKey) -> Option<Vec<u8>> {
 #[cfg(target_arch = "wasm32")]
 fn store_cached(_k: TileKey, _data: &[u8]) {}
 
+// ---------- 球面贴图瓦片共用的磁盘缓存（tile_z_x_y.img 命名空间） ----------
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_cached_tile_bytes(z: u8, x: u32, y: u32) -> Option<Vec<u8>> {
+    let dir = cache_dir();
+    let path = dir.join(format!("globe_{z}_{x}_{y}.img"));
+    let meta = std::fs::metadata(&path).ok()?;
+    if meta.modified().ok()?.elapsed().ok()? > CACHE_TTL {
+        return None;
+    }
+    std::fs::read(&path).ok().filter(|b| !b.is_empty())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn store_cached_tile_bytes(z: u8, x: u32, y: u32, data: &[u8]) {
+    let dir = cache_dir();
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join(format!("globe_{z}_{x}_{y}.img"));
+    let tmp = path.with_extension("tmp");
+    if std::fs::write(&tmp, data).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn load_cached_tile_bytes(_z: u8, _x: u32, _y: u32) -> Option<Vec<u8>> {
+    None
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn store_cached_tile_bytes(_z: u8, _x: u32, _y: u32, _data: &[u8]) {}
+
 // ---------- 瓦片载荷 ----------
 
 pub struct TilePayload {

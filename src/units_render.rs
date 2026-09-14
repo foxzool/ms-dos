@@ -11,7 +11,7 @@ use bevy::prelude::*;
 
 use crate::camera::CameraRig;
 use crate::input::Selection;
-use crate::map_render::{palette, polyline_strip, seg_quad};
+use crate::map_render::{palette, polyline_strip};
 use crate::sim::{Domain, Side, Unit, Heading, Position, SpeedMps};
 
 /// 符号基准半径（屏幕像素）

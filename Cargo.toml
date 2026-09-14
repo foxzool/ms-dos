@@ -27,7 +27,7 @@ js-sys = "0.3"
 [dependencies.image]
 version = "0.25"
 default-features = false
-features = ["png"]
+features = ["png", "jpeg"]
 
 # 首次全量编译较慢；打开少量优化让运行时帧率可用，同时保留增量编译速度
 [profile.dev]
