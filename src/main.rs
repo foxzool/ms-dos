@@ -58,6 +58,7 @@ pub enum RenderMode {
 /// 启动配置（CLI 解析结果）
 #[derive(Resource)]
 struct Launch {
+    globe_alt: Option<f32>,
     map_path: Option<String>,
     screenshot: Option<String>,
     render_image: Option<String>,
@@ -89,7 +90,9 @@ struct RenderImageJob {
 struct RenderImageDone(bool);
 
 fn parse_args() -> Launch {
+    let mut globe_alt: Option<f32> = None;
     let mut launch = Launch {
+        globe_alt: None,
         map_path: None,
         screenshot: None,
         render_image: None,
@@ -139,6 +142,11 @@ fn parse_args() -> Launch {
                     launch.frames = v.parse().ok();
                 }
             }
+            "--globe-alt" => {
+                if let Some(v) = it.next() {
+                    globe_alt = v.parse().ok();
+                }
+            }
             "--zoom" => {
                 if let Some(v) = it.next() {
                     launch.zoom = v.parse().ok();
@@ -147,6 +155,7 @@ fn parse_args() -> Launch {
             _ => {}
         }
     }
+    launch.globe_alt = globe_alt;
     launch
 }
 
@@ -155,6 +164,7 @@ fn main() {
     use bevy::asset::{embedded_asset, load_embedded_asset};
 
     let launch = parse_args();
+    let globe_alt = launch.globe_alt;
     let mode = if launch.selftest_ui {
         RenderMode::Selftest
     } else if launch.render_globe {
@@ -259,6 +269,12 @@ fn main() {
 
     // URL 恢复视图交给 setup_world 应用（避免被默认视野覆盖）
     app.insert_resource(UrlView(url_view));
+
+    // 诊断/验证：--globe-alt 指定地球初始视距
+    if let Some(alt) = globe_alt {
+        let mut rig = app.world_mut().resource_mut::<globe::GlobeRig>();
+        rig.distance = globe::GLOBE_RADIUS + alt;
+    }
 
     // 地球贴图内嵌进二进制（wasm 免网络加载、免 .meta 探测；桌面端同样可用）
     bevy::asset::embedded_asset!(&mut app, "src/", "../assets/earth_2048.jpg");

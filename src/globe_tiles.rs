@@ -222,8 +222,11 @@ pub fn globe_tile_system(
             Ok(payload) => {
                 let mesh = meshes.add(globe_patch_mesh(k.z, k.x, k.y, GLOBE_RADIUS * 1.015, 16, 8));
                 let tex = images.add(payload.image);
+                // 暗蓝色调：Blue Marble Bathymetry 的海洋/冰盖本色偏亮（测深渐变+南极冰），
+                // 乘以冷色 tint 压回战术地球观感
                 let mat = materials.add(bevy::pbr::StandardMaterial {
                     base_color_texture: Some(tex),
+                    base_color: bevy::color::Color::srgb(0.52, 0.60, 0.72),
                     unlit: true,
                     cull_mode: None,
                     ..default()
