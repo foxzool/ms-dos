@@ -244,7 +244,7 @@ pub(crate) fn seg_quad(
 }
 
 /// 经纬网（默认 0.05 度间隔，跨数据外接框外扩 20%）
-pub fn graticule_lines(map: &MapData, proj: &Projection, step_deg: f64) -> Vec<Line> {
+pub fn graticule_lines(map: &MapData, proj: &Projection, step_deg: f64, width_m: f32) -> Vec<Line> {
     let (mut min_lat, mut max_lat) = proj.unproject(map.min);
     let (max_lat2, min_lat2) = proj.unproject(map.max);
     min_lat = min_lat.min(min_lat2);
@@ -262,7 +262,7 @@ pub fn graticule_lines(map: &MapData, proj: &Projection, step_deg: f64) -> Vec<L
     max_lon += pad_lon;
 
     let mut lines = Vec::new();
-    let w = 40.0;
+    let w = width_m;
     let mut lat = (min_lat / step_deg).ceil() * step_deg;
     while lat <= max_lat {
         let a = proj.project(lat, min_lon);
@@ -280,6 +280,18 @@ pub fn graticule_lines(map: &MapData, proj: &Projection, step_deg: f64) -> Vec<L
     lines
 }
 
+/// 经纬网线宽：按瓦片 zoom 级换算为屏幕恒定 ~1.2px
+/// （merc 瓦片宽 / 2^z；视口半宽约 2.5 瓦片 ≈ 400px）
+pub fn graticule_width_for_zoom(z: u8) -> f32 {
+    const TILE_MERCATOR_WIDTH: f64 = 40_075_016.7;
+    ((TILE_MERCATOR_WIDTH / (1u64 << z.min(20)) as f64) / 400.0 * 1.2) as f32
+}
+
+/// 静态模式：按初始视口（数据外接框高 / 900px）换算
+pub fn graticule_width_for_bounds(bounds_height_m: f32) -> f32 {
+    (bounds_height_m / 900.0 * 1.2).max(4.0)
+}
+
 /// 场景中的一层：颜色 + z 序 + 网格（可在任务线程构建，主线程生成实体）
 pub struct MapLayer {
     pub color: Color,
@@ -289,7 +301,7 @@ pub struct MapLayer {
 
 /// 构建全部地图层并合并为单个顶点色网格（纯函数，可在任务线程调用）。
 /// 层序即绘制序（后追加覆盖先追加），替代多实体的 z 排序。
-pub fn build_map_mesh(map: &MapData, proj: &Projection) -> Mesh {
+pub fn build_map_mesh(map: &MapData, proj: &Projection, graticule_width_m: f32) -> Mesh {
     let mut acc = MeshAccumulator::default();
     let mut layers: Vec<MapLayer> = Vec::new();
 
@@ -322,7 +334,7 @@ pub fn build_map_mesh(map: &MapData, proj: &Projection) -> Mesh {
     push_lines(|k| *k == LineKind::Road(crate::osm::RoadClass::Mid), palette::ROAD_MID, 5.4, &mut layers);
     push_lines(|k| *k == LineKind::Road(crate::osm::RoadClass::Major), palette::ROAD_MAJOR, 5.5, &mut layers);
 
-    let grat = graticule_lines(map, proj, 0.05);
+    let grat = graticule_lines(map, proj, 0.05, graticule_width_m);
     layers.push(MapLayer { color: palette::GRATICULE, z: 8.0, mesh: line_mesh(&grat) });
 
     for layer in &layers {
@@ -498,6 +510,17 @@ mod tests {
     }
 
     #[test]
+    fn graticule_width_scales() {
+        // z13 → ~14.7m；z6 → ~1880m；每级恒定 ~1.2 屏幕像素
+        let w13 = graticule_width_for_zoom(13);
+        let w6 = graticule_width_for_zoom(6);
+        assert!((w13 - 14.7).abs() < 0.5, "z13 线宽 {w13}");
+        assert!((w6 - 1879.9).abs() < 5.0, "z6 线宽 {w6}");
+        assert!((w13 - graticule_width_for_zoom(14) * 2.0).abs() < 0.5, "相邻级应差 2 倍");
+        assert!((graticule_width_for_bounds(13_600.0) - 18.13).abs() < 0.1);
+    }
+
+    #[test]
     fn graticule_produces_lines() {
         let map = MapData {
             min: Vec2::new(-5000.0, -5000.0),
@@ -505,7 +528,7 @@ mod tests {
             ..Default::default()
         };
         let proj = Projection::new(21.35, -157.92);
-        let lines = graticule_lines(&map, &proj, 0.05);
+        let lines = graticule_lines(&map, &proj, 0.05, 15.0);
         assert!(!lines.is_empty(), "应生成经纬网线");
         assert!(lines.iter().all(|l| l.pts.len() == 2));
     }
