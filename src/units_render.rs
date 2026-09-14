@@ -11,7 +11,7 @@ use bevy::prelude::*;
 
 use crate::camera::CameraRig;
 use crate::input::Selection;
-use crate::map_render::{palette, seg_quad};
+use crate::map_render::{palette, polyline_strip, seg_quad};
 use crate::sim::{Domain, Side, Unit, Heading, Position, SpeedMps};
 
 /// 符号基准半径（屏幕像素）
@@ -63,8 +63,11 @@ fn polylines_mesh(lines: &[&[Vec2]], width: f32) -> Mesh {
     let mut verts: Vec<[f32; 3]> = Vec::new();
     let mut idx: Vec<u32> = Vec::new();
     for line in lines {
-        for pair in line.windows(2) {
-            seg_quad(&pair[0], &pair[1], width, &mut verts, &mut idx);
+        if line.first() == line.last() && line.len() > 2 {
+            // 闭合折线（符号框）：去掉重复末点，由 strip 的闭合焊接处理
+            polyline_strip(&line[..line.len() - 1], width, true, &mut verts, &mut idx);
+        } else {
+            polyline_strip(line, width, false, &mut verts, &mut idx);
         }
     }
     new_mesh(verts, idx)

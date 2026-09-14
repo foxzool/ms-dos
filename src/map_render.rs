@@ -80,14 +80,101 @@ pub fn line_mesh(lines: &[Line]) -> Mesh {
     let mut verts: Vec<[f32; 3]> = Vec::new();
     let mut idx: Vec<u32> = Vec::new();
     for line in lines {
-        for pair in line.pts.windows(2) {
-            let a = pair[0];
-            let b = pair[1];
-            let n = seg_quad(&a, &b, line.width, &mut verts, &mut idx);
-            let _ = n;
-        }
+        polyline_strip(&line.pts, line.width, false, &mut verts, &mut idx);
     }
     new_mesh(verts, idx)
+}
+
+/// 折线 → miter-join 条带。
+///
+/// 相邻段在共享点用 miter 点（法线平均 + 半角扩展）连接：
+/// - 内部顶点左右成对（2N 顶点、6(N-1) 索引），替代逐段独立四边形的 4(N-1) 顶点 / 12(N-1) 索引；
+/// - 消除斜接头处的外角缺口与内角自重叠；
+/// - `closed` 时首尾焊接（索引回绕首点对），闭合框无接缝。
+/// 端点（非闭合）外延半宽作 square cap，掩盖道路交叉口的 way 接缝。
+pub(crate) fn polyline_strip(
+    pts: &[Vec2],
+    width: f32,
+    closed: bool,
+    verts: &mut Vec<[f32; 3]>,
+    idx: &mut Vec<u32>,
+) {
+    let n = pts.len();
+    if n < 2 {
+        return;
+    }
+    let half = width * 0.5;
+    let miter_limit = 2.0 * half; // miter 长度上限（超过退化为平头）
+
+    // 每个折线点的“扩展法线”（miter 向量 × half）
+    let mut offsets: Vec<Vec2> = Vec::with_capacity(n);
+    for i in 0..n {
+        let prev = if i == 0 {
+            if closed { pts[n - 2] } else { pts[0] }
+        } else {
+            pts[i - 1]
+        };
+        let next = if i == n - 1 {
+            if closed { pts[1] } else { pts[n - 1] }
+        } else {
+            pts[i + 1]
+        };
+        let d1 = pts[i] - prev;
+        let d2 = next - pts[i];
+        let l1 = d1.length();
+        let l2 = d2.length();
+        let (n1, n2) = if l1 < 1e-6 || l2 < 1e-6 {
+            let d = if l2 >= l1 { d2 } else { d1 };
+            let dl = d.length();
+            if dl < 1e-6 {
+                offsets.push(Vec2::ZERO);
+                continue;
+            }
+            let nn = Vec2::new(-d.y, d.x) / dl;
+            (nn, nn)
+        } else {
+            (Vec2::new(-d1.y, d1.x) / l1, Vec2::new(-d2.y, d2.x) / l2)
+        };
+        // miter：法线平均归一化，按 cos(半角) 扩展
+        let m = n1 + n2;
+        let ml = m.length();
+        let offset = if ml < 1e-6 {
+            // 180° 折返：用 n1（任意一侧）
+            n1 * half
+        } else {
+            let m = m / ml;
+            let cos_half = (n1.dot(m)).max(0.2); // clamp 防爆炸（对应 miter limit ≈ 5）
+            let len = (half / cos_half).min(miter_limit);
+            m * len
+        };
+        offsets.push(offset);
+    }
+
+    let base = verts.len() as u32;
+    for i in 0..n {
+        let o = offsets[i];
+        let mut p = pts[i];
+        if !closed {
+            if i == 0 {
+                p -= (pts[1] - pts[0]).normalize_or_zero() * half;
+            } else if i == n - 1 {
+                p += (pts[n - 1] - pts[n - 2]).normalize_or_zero() * half;
+            }
+        }
+        verts.push([(p - o).x, (p - o).y, 0.0]);
+        verts.push([(p + o).x, (p + o).y, 0.0]);
+    }
+    for i in 0..n - 1 {
+        let l = base + i as u32 * 2;
+        // 左右成对：L(i) R(i) R(i+1) L(i+1)
+        idx.extend_from_slice(&[l, l + 1, l + 3, l, l + 3, l + 2]);
+    }
+    if closed && n >= 3 {
+        // 闭合焊接：末点 (n-1) 连回首点 0（首点 miter 已含末段方向）
+        let first = base;
+        let last = base + (n - 1) as u32 * 2;
+        idx.extend_from_slice(&[last, last + 1, first + 1, last, first + 1, first]);
+    }
 }
 
 /// 单段线 → 四边形，返回起始顶点索引
@@ -111,9 +198,8 @@ pub(crate) fn seg_quad(
     verts.push([(a + n).x, (a + n).y, 0.0]);
     verts.push([(b + n).x, (b + n).y, 0.0]);
     verts.push([(b - n).x, (b - n).y, 0.0]);
-    // 双面三角形
+    // Mesh2d 管线 cull_mode: None（双面），单绕序即可
     idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-    idx.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
     base
 }
 
@@ -283,13 +369,85 @@ mod tests {
     }
 
     #[test]
-    fn line_mesh_quad_count() {
+    fn line_mesh_strip_structure() {
         let l = line(vec![Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 100.0)]);
         let mesh = line_mesh(&[l]);
-        // 2 段 × 每段 4 顶点（双面三角形不增加顶点）
-        assert_eq!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len(), 8);
-        // 2 段 × 每段 4 个三角形 × 3 索引
-        assert_eq!(mesh.indices().unwrap().len(), 24);
+        // miter strip：3 点折线 → 每点 2 顶点
+        assert_eq!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len(), 6);
+        // 2 段 × 单面 2 三角形 × 3 索引
+        assert_eq!(mesh.indices().unwrap().len(), 12);
+    }
+
+    #[test]
+    fn polyline_strip_closed_welds() {
+        let mut verts: Vec<[f32; 3]> = Vec::new();
+        let mut idx: Vec<u32> = Vec::new();
+        // 正方形闭合框（不重复首点）
+        polyline_strip(
+            &[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)],
+            2.0,
+            true,
+            &mut verts,
+            &mut idx,
+        );
+        // 4 点 × 2 顶点
+        assert_eq!(verts.len(), 8);
+        // 4 段（含焊接末段）× 6 索引
+        assert_eq!(idx.len(), 24);
+        // 直角处 miter 扩展：角点偏移应大于 half（1.0）——正方形直角 cos45°≈0.707 → 偏移 ≈1.414
+        // 检查第 2 点（直角）的左右顶点间距 ≈ 2×1.414
+        let l = Vec2::new(verts[2][0], verts[2][1]);
+        let r = Vec2::new(verts[3][0], verts[3][1]);
+        let d = (r - l).length();
+        assert!((d - 2.0 * 2f32.sqrt()).abs() < 0.05, "直角 miter 间距 = {d}");
+    }
+
+    #[test]
+    fn polyline_strip_open_caps() {
+        let mut verts: Vec<[f32; 3]> = Vec::new();
+        let mut idx: Vec<u32> = Vec::new();
+        polyline_strip(&[Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0)], 10.0, false, &mut verts, &mut idx);
+        // 单段：4 顶点、单面 6 索引
+        assert_eq!(verts.len(), 4);
+        assert_eq!(idx.len(), 6);
+        // square cap 外延 5：首点 x = -5，末点 x = 105
+        assert!((verts[0][0] + 5.0).abs() < 1e-3);
+        assert!((verts[2][0] - 105.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn pearl_harbor_line_stats() {
+        let xml = std::fs::read_to_string("data/pearl_harbor.osm").unwrap();
+        let data = crate::osm::parse_osm(&xml).unwrap();
+        let proj = data.projection().unwrap();
+        let map = crate::osm::extract_map(&data, &proj);
+        let mesh = line_mesh(&map.lines);
+        let v = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len();
+        let i = mesh.indices().unwrap().len();
+        let segs: usize = map.lines.iter().map(|l| l.pts.len() - 1).sum();
+        println!("珍珠港线层: {} 条线 / {} 段 | strip v={v} i={i} | legacy v={} i={}",
+            map.lines.len(), segs, segs * 4, segs * 12);
+    }
+
+    #[test]
+    fn road_layer_mesh_stats() {
+        // 模拟 5000 条 8 点道路：对比 strip vs 逐段四边形的顶点/索引量
+        let roads: Vec<Line> = (0..5000)
+            .map(|k| Line {
+                kind: LineKind::Road(RoadClass::Minor),
+                pts: (0..8).map(|i| Vec2::new(i as f32 * 10.0, (i % 3) as f32 * 7.0 + k as f32)).collect(),
+                width: 10.0,
+            })
+            .collect();
+        let mesh = line_mesh(&roads);
+        let v = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len();
+        let i = mesh.indices().unwrap().len();
+        let segs: u32 = roads.iter().map(|l| l.pts.len() as u32 - 1).sum();
+        let old_v = (segs * 4) as usize;
+        let old_i = (segs * 12) as usize;
+        println!("strip: v={v} i={i} | legacy: v={old_v} i={old_i} | 顶点 {}% 索引 {}%",
+            v * 100 / old_v, i * 100 / old_i);
+        assert!(v < old_v && i < old_i);
     }
 
     #[test]
