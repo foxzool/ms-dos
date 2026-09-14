@@ -487,11 +487,21 @@ pub fn tile_stream_system(
     }
 
     // ---- 4. LRU 淘汰视口外的旧瓦片 ----
-    while cache.lru.len() > MAX_TILES {
+    // 逐出条件是“地理上不再覆盖视口”（而非不在当前 zoom 网格）：
+    // 缩放切换 zoom 级时旧级瓦片继续显示（被新级细节覆盖），避免下载过渡期空洞
+    let mut attempts = cache.lru.len();
+    while cache.lru.len() > MAX_TILES && attempts > 0 {
+        attempts -= 1;
         let Some(victim) = cache.lru.pop_front() else { break };
         if wanted.contains(&victim) {
             cache.lru.push_front(victim);
             break;
+        }
+        let (vs, vw, vn, ve) = tile_bbox_latlon(victim);
+        let covers_viewport = vs <= lat_n && vn >= lat_s && vw <= lon_e && ve >= lon_w;
+        if covers_viewport {
+            cache.lru.push_back(victim);
+            continue; // 仍覆盖视口，移到队尾保留，尝试下一候选
         }
         if let Some(TileStatus::Loaded(spawned)) = cache.tiles.remove(&victim) {
             commands.entity(spawned.entity).despawn();
