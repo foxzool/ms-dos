@@ -6,20 +6,26 @@
 //! - 解析/格式化为纯函数，双端可单测；浏览器 API 调用仅 wasm 编译。
 
 use bevy::prelude::*;
+#[cfg(target_arch = "wasm32")]
 use bevy::ecs::system::{Local, Res};
 
+#[cfg(target_arch = "wasm32")]
 use crate::camera::CameraRig;
+#[cfg(target_arch = "wasm32")]
 use crate::globe::{AppState, GlobeRig};
+#[cfg(target_arch = "wasm32")]
 use crate::MapCtx;
 
 /// URL 恢复的初始视图
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // native 下仅单元测试使用
 pub enum InitialView {
     Map { lat: f64, lon: f64, mpp: f32 },
     Globe { lat: f32, lon: f32 },
 }
 
 /// 解析 hash（如 `#map=21.355,-157.925,17.8`）
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn parse_hash(s: &str) -> Option<InitialView> {
     let body = s.trim_start_matches('#');
     let (kind, rest) = body.split_once('=')?;
@@ -48,11 +54,13 @@ pub fn parse_hash(s: &str) -> Option<InitialView> {
 }
 
 /// 地图态 hash（纬度 5 位 ≈ 1m，mpp 2 位）
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn format_map(lat: f64, lon: f64, mpp: f32) -> String {
     format!("#map={lat:.5},{lon:.5},{mpp:.2}")
 }
 
 /// 地球态 hash
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn format_globe(lat: f32, lon: f32) -> String {
     format!("#globe={lat:.3},{lon:.3}")
 }
@@ -75,6 +83,7 @@ pub fn read_initial_view() -> Option<InitialView> {
 }
 
 #[derive(Default)]
+#[cfg(target_arch = "wasm32")]
 pub(crate) struct LastUrl {
     text: String,
     since: f32,

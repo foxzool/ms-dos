@@ -298,7 +298,7 @@ fn setup_world(
     launch: Res<Launch>,
     url_view: Res<UrlView>,
     mut rig: ResMut<camera::CameraRig>,
-    mut globe_rig: ResMut<globe::GlobeRig>,
+    globe_rig: ResMut<globe::GlobeRig>,
     mut ring: ResMut<globe::DataRing>,
     window: Query<&bevy::window::Window, With<PrimaryWindow>>,
 ) {
