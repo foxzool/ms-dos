@@ -16,12 +16,14 @@ use crate::globe::{AppState, GlobeRig};
 #[cfg(target_arch = "wasm32")]
 use crate::MapCtx;
 
-/// URL 恢复的初始视图
+/// URL 恢复的初始视图。zoom 以“视高”（米）表达：
+/// - Map：视口地面垂直跨度（= mpp × 窗口高度像素），跨设备一致
+/// - Globe：相机离地表高度（= 距球心距离 − 地球半径）
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // native 下仅单元测试使用
 pub enum InitialView {
-    Map { lat: f64, lon: f64, mpp: f32 },
-    Globe { lat: f32, lon: f32 },
+    Map { lat: f64, lon: f64, alt_m: f32 },
+    Globe { lat: f32, lon: f32, alt_m: f32 },
 }
 
 /// 解析 hash（如 `#map=21.355,-157.925,17.8`）
@@ -34,35 +36,41 @@ pub fn parse_hash(s: &str) -> Option<InitialView> {
             let mut it = rest.split(',');
             let lat: f64 = it.next()?.parse().ok()?;
             let lon: f64 = it.next()?.parse().ok()?;
-            let mpp: f32 = it.next()?.parse().ok()?;
-            if !(-85.0..=85.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) || !(1.2..=1200.0).contains(&mpp) {
+            let alt: f32 = it.next()?.parse().ok()?;
+            // 视高合法范围：约 100m（近观）… 2,000km（全球缩放）
+            if !(-85.0..=85.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) || !(100.0..=2_000_000.0).contains(&alt) {
                 return None;
             }
-            Some(InitialView::Map { lat, lon, mpp })
+            Some(InitialView::Map { lat, lon, alt_m: alt })
         }
         "globe" => {
             let mut it = rest.split(',');
             let lat: f32 = it.next()?.parse().ok()?;
             let lon: f32 = it.next()?.parse().ok()?;
-            if !(-85.0..=85.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) {
+            // 高度可选（缺省 = 全球视角 2.9R ≈ 12,000km 离地）
+            let alt: f32 = match it.next() {
+                Some(v) => v.parse().ok()?,
+                None => 12_000_000.0,
+            };
+            if !(-85.0..=85.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) || !(10_000.0..=20_000_000.0).contains(&alt) {
                 return None;
             }
-            Some(InitialView::Globe { lat, lon })
+            Some(InitialView::Globe { lat, lon, alt_m: alt })
         }
         _ => None,
     }
 }
 
-/// 地图态 hash（纬度 5 位 ≈ 1m，mpp 2 位）
+/// 地图态 hash（纬度 5 位 ≈ 1m；zoom = 视高米）
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub fn format_map(lat: f64, lon: f64, mpp: f32) -> String {
-    format!("#map={lat:.5},{lon:.5},{mpp:.2}")
+pub fn format_map(lat: f64, lon: f64, alt_m: f32) -> String {
+    format!("#map={lat:.5},{lon:.5},{alt_m:.0}")
 }
 
-/// 地球态 hash
+/// 地球态 hash（zoom = 离地表高度米，缺省全球）
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub fn format_globe(lat: f32, lon: f32) -> String {
-    format!("#globe={lat:.3},{lon:.3}")
+pub fn format_globe(lat: f32, lon: f32, alt_m: f32) -> String {
+    format!("#globe={lat:.3},{lon:.3},{alt_m:.0}")
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -96,6 +104,7 @@ pub fn sync_url_system(
     map_rig: Res<CameraRig>,
     globe_rig: Res<GlobeRig>,
     ctx: Res<MapCtx>,
+    window: Query<&bevy::window::Window, bevy::ecs::query::With<bevy::window::PrimaryWindow>>,
     time: Res<Time>,
     mut last: Local<LastUrl>,
 ) {
@@ -103,12 +112,19 @@ pub fn sync_url_system(
     if last.since < 0.3 {
         return;
     }
+    let win_h = window.single().map(|w| w.height()).unwrap_or(900.0);
     let text = match *state.get() {
         AppState::Map => {
             let (lat, lon) = ctx.proj.unproject(map_rig.target);
-            format_map(lat, lon, map_rig.mpp)
+            // 视高 = 视口地面垂直跨度
+            format_map(lat, lon, map_rig.mpp * win_h)
         }
-        AppState::Globe => format_globe(globe_rig.lat, globe_rig.lon),
+        AppState::Globe => format_globe(
+            globe_rig.lat,
+            globe_rig.lon,
+            // 离地表高度（视距公式的逆：alt = (dist − R)）
+            (globe_rig.distance - crate::globe::GLOBE_RADIUS).max(0.0),
+        ),
     };
     if text == last.text {
         return;
@@ -133,12 +149,12 @@ mod tests {
 
     #[test]
     fn map_roundtrip() {
-        let url = format_map(21.35498, -157.92512, 17.83);
+        let url = format_map(21.35498, -157.92512, 10_008.0);
         match parse_hash(&url) {
-            Some(InitialView::Map { lat, lon, mpp }) => {
+            Some(InitialView::Map { lat, lon, alt_m }) => {
                 assert!((lat - 21.35498).abs() < 1e-5);
                 assert!((lon - (-157.92512)).abs() < 1e-5);
-                assert!((mpp - 17.83).abs() < 0.02);
+                assert!((alt_m - 10_008.0).abs() < 1.0);
             }
             other => panic!("解析失败: {other:?}"),
         }
@@ -146,11 +162,21 @@ mod tests {
 
     #[test]
     fn globe_roundtrip() {
-        let url = format_globe(35.68, 139.77);
+        let url = format_globe(35.68, 139.77, 12_000_000.0);
         match parse_hash(&url) {
-            Some(InitialView::Globe { lat, lon }) => {
+            Some(InitialView::Globe { lat, lon, alt_m }) => {
                 assert!((lat - 35.68).abs() < 1e-3 && (lon - 139.77).abs() < 1e-3);
+                assert!((alt_m - 12_000_000.0).abs() < 1.0);
             }
+            other => panic!("解析失败: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn globe_default_alt() {
+        // 高度缺省 → 全球视角
+        match parse_hash("#globe=21.4,-158.0") {
+            Some(InitialView::Globe { alt_m, .. }) => assert!((alt_m - 12_000_000.0).abs() < 1.0),
             other => panic!("解析失败: {other:?}"),
         }
     }
@@ -158,9 +184,10 @@ mod tests {
     #[test]
     fn invalid_hashes_rejected() {
         assert!(parse_hash("").is_none());
-        assert!(parse_hash("#map=1,2").is_none()); // 缺 mpp
-        assert!(parse_hash("#map=99,0,10").is_none()); // 纬度越界
-        assert!(parse_hash("#map=0,0,99999").is_none()); // mpp 越界
+        assert!(parse_hash("#map=1,2").is_none()); // 缺高度
+        assert!(parse_hash("#map=99,0,1000").is_none()); // 纬度越界
+        assert!(parse_hash("#map=0,0,99").is_none()); // 高度低于下限
+        assert!(parse_hash("#map=0,0,9999999").is_none()); // 高度超上限
         assert!(parse_hash("#foo=1,2,3").is_none());
     }
 }

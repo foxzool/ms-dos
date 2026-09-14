@@ -249,7 +249,7 @@ fn main() {
             tiles::tile_stream_system.run_if(in_state(globe::AppState::Map)),
         )
         .add_systems(Update, globe::sync_data_ring.run_if(in_state(globe::AppState::Globe)))
-        .add_systems(Update, weburl::sync_url_system);
+        .add_systems(Update, (apply_url_view, weburl::sync_url_system).chain());
 
     // URL 恢复视图交给 setup_world 应用（避免被默认视野覆盖）
     app.insert_resource(UrlView(url_view));
@@ -281,6 +281,47 @@ fn asset_plugin_config() -> bevy::asset::AssetPlugin {
     }
 }
 
+/// 首帧应用 URL 恢复视图（Startup 时 fit_canvas_to_parent 未生效、窗口高度仍是默认值，
+/// 视高→mpp 换算需等窗口尺寸稳定）
+fn apply_url_view(
+    mut done: Local<bool>,
+    mut frames: Local<u32>,
+    mut url_view: Option<ResMut<UrlView>>,
+    mut rig: ResMut<camera::CameraRig>,
+    mut globe_rig: ResMut<globe::GlobeRig>,
+    window: Query<&bevy::window::Window, With<PrimaryWindow>>,
+) {
+    if *done {
+        return;
+    }
+    *frames += 1;
+    // fit_canvas_to_parent 的 ResizeObserver 在首帧后才回调；
+    // 等窗口尺寸偏离默认（1600×900）或超时 30 帧再换算视高
+    let size_ready = window.single().map_or(true, |w| {
+        *frames > 30 || (w.width() - 1600.0).abs() > 1.0 || (w.height() - 900.0).abs() > 1.0
+    });
+    if !size_ready {
+        return;
+    }
+    let Some(mut view) = url_view.as_deref_mut() else { *done = true; return };
+    let Some(v) = view.0.take() else { *done = true; return };
+    let win_h = window.single().map(|w| w.height()).unwrap_or(900.0);
+    match v {
+        weburl::InitialView::Map { lat, lon, alt_m } => {
+            let global = Projection::global();
+            rig.target = global.project(lat, lon);
+            rig.mpp = (alt_m / win_h).clamp(1.2, globe::MAP_MAX_MPP);
+        }
+        weburl::InitialView::Globe { lat, lon, alt_m } => {
+            globe_rig.lat = lat.clamp(-85.0, 85.0);
+            globe_rig.lon = lon;
+            globe_rig.distance = (globe::GLOBE_RADIUS + alt_m)
+                .clamp(globe::GLOBE_RADIUS * 1.02, globe::GLOBE_RADIUS * 4.0);
+        }
+    }
+    *done = true;
+}
+
 /// 场景时间推进
 fn advance_clock(mut clock: ResMut<SimClock>, time: Res<Time>) {
     clock.t += clock.sim_dt(time.delta().as_secs_f32()) as f64;
@@ -296,9 +337,8 @@ fn setup_world(
     earth: Res<globe::EarthTexture>,
     mode: Res<RenderMode>,
     launch: Res<Launch>,
-    url_view: Res<UrlView>,
+    _url_view: Res<UrlView>,
     mut rig: ResMut<camera::CameraRig>,
-    globe_rig: ResMut<globe::GlobeRig>,
     mut ring: ResMut<globe::DataRing>,
     window: Query<&bevy::window::Window, With<PrimaryWindow>>,
 ) {
@@ -464,19 +504,7 @@ fn setup_world(
     rig.mpp = launch.zoom.unwrap_or_else(|| {
         ((bounds.height() * 1.18) / win_h).clamp(1.2, globe::MAP_MAX_MPP)
     });
-    if let Some(view) = url_view.0 {
-        match view {
-            weburl::InitialView::Map { lat, lon, mpp } => {
-                rig.target = proj.project(lat, lon);
-                rig.mpp = mpp.clamp(1.2, globe::MAP_MAX_MPP);
-            }
-            weburl::InitialView::Globe { lat, lon } => {
-                let mut g = globe_rig;
-                g.lat = lat.clamp(-85.0, 85.0);
-                g.lon = lon;
-            }
-        }
-    }
+
 }
 
 /// 自动截图（启动后等几帧让字体/布局就绪）
