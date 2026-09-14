@@ -42,6 +42,46 @@ fn new_mesh(positions: Vec<[f32; 3]>, indices: Vec<u32>) -> Mesh {
     mesh
 }
 
+/// 顶点色合并网格的累积器：每图层按序追加（后追加的覆盖先追加的，替代多实体 z 排序）
+#[derive(Default)]
+pub struct MeshAccumulator {
+    positions: Vec<[f32; 3]>,
+    colors: Vec<[f32; 4]>,
+    indices: Vec<u32>,
+}
+
+impl MeshAccumulator {
+    /// 追加一个已构建图层的网格（顶点色统一为该层颜色，linear 空间）
+    pub fn append_mesh(&mut self, mesh: &Mesh, color: Color) {
+        let verts = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .and_then(|v| v.as_float3())
+            .map(|v| v.to_vec())
+            .unwrap_or_default();
+        let idx = mesh
+            .indices()
+            .map(|i| match i {
+                Indices::U32(v) => v.clone(),
+                Indices::U16(v) => v.iter().map(|&x| x as u32).collect(),
+            })
+            .unwrap_or_default();
+        let base = self.positions.len() as u32;
+        let rgba = color.to_linear().to_f32_array();
+        self.positions.extend(verts);
+        self.colors.extend(std::iter::repeat(rgba).take(mesh.attribute(Mesh::ATTRIBUTE_POSITION).map(|v| v.len()).unwrap_or(0)));
+        self.indices.extend(idx.iter().map(|&i| base + i));
+    }
+
+    /// 生成带顶点色的单 Mesh（ColorMaterial 白色 × 顶点色）
+    pub fn build(self) -> Mesh {
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.colors);
+        mesh.insert_indices(Indices::U32(self.indices));
+        mesh
+    }
+}
+
 /// 面要素集合 → 单个三角化 Mesh（含洞）
 pub fn poly_mesh(polys: &[Poly]) -> Mesh {
     let mut verts: Vec<[f32; 3]> = Vec::new();
@@ -247,9 +287,10 @@ pub struct MapLayer {
     pub mesh: Mesh,
 }
 
-/// 构建全部地图层（纯函数，可在任务线程调用）。
-/// `proj` 应为以网格局部原点为中心的投影，返回顶点为局部坐标。
-pub fn build_map_layers(map: &MapData, proj: &Projection) -> Vec<MapLayer> {
+/// 构建全部地图层并合并为单个顶点色网格（纯函数，可在任务线程调用）。
+/// 层序即绘制序（后追加覆盖先追加），替代多实体的 z 排序。
+pub fn build_map_mesh(map: &MapData, proj: &Projection) -> Mesh {
+    let mut acc = MeshAccumulator::default();
     let mut layers: Vec<MapLayer> = Vec::new();
 
     let push_polys = |kind: PolyKind, color: Color, z: f32, layers: &mut Vec<MapLayer>| {
@@ -284,38 +325,44 @@ pub fn build_map_layers(map: &MapData, proj: &Projection) -> Vec<MapLayer> {
     let grat = graticule_lines(map, proj, 0.05);
     layers.push(MapLayer { color: palette::GRATICULE, z: 8.0, mesh: line_mesh(&grat) });
 
-    layers
+    for layer in &layers {
+        acc.append_mesh(&layer.mesh, layer.color);
+    }
+    acc.build()
 }
 
-/// 已生成的地图层实体（供卸载时回收资产）
+/// 已生成的地图网格实体（供卸载时回收资产）
 pub struct SpawnedMapLayer {
     pub entity: Entity,
     pub mesh: Handle<Mesh>,
     pub material: Handle<ColorMaterial>,
 }
 
-/// 把构建好的层生成实体（主线程）。`origin` 为网格局部坐标原点的世界位置。
+/// 把合并网格生成单实体（主线程）。`origin` 为网格局部坐标原点的世界位置。
+/// 白色 Blend 材质 × 顶点色；全局材质由 `white_vertex_material` 提供。
 pub fn spawn_map_layers_at(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<ColorMaterial>,
-    layers: Vec<MapLayer>,
+    mesh: Mesh,
     origin: Vec2,
-) -> Vec<SpawnedMapLayer> {
-    let mut spawned = Vec::with_capacity(layers.len());
-    for layer in layers {
-        let mesh: Handle<Mesh> = meshes.add(layer.mesh);
-        let mat: Handle<ColorMaterial> = materials.add(ColorMaterial::from(layer.color));
-        let entity = commands
-            .spawn((
-                Mesh2d(mesh.clone()),
-                MeshMaterial2d(mat.clone()),
-                Transform::from_xyz(origin.x, origin.y, layer.z),
-            ))
-            .id();
-        spawned.push(SpawnedMapLayer { entity, mesh, material: mat });
-    }
-    spawned
+    shared_material: &Handle<ColorMaterial>,
+) -> SpawnedMapLayer {
+    let handle = meshes.add(mesh);
+    let entity = commands
+        .spawn((
+            Mesh2d(handle.clone()),
+            MeshMaterial2d(shared_material.clone()),
+            Transform::from_xyz(origin.x, origin.y, 0.0),
+        ))
+        .id();
+    SpawnedMapLayer { entity, mesh: handle, material: shared_material.clone() }
+}
+
+/// 顶点色渲染共享材质（白色 × Blend，保证图层间按顶点序混合）
+pub fn white_vertex_material(materials: &mut Assets<ColorMaterial>) -> Handle<ColorMaterial> {
+    // ColorMaterial 默认 AlphaMode2d::Blend（顶点序即混合序）
+    materials.add(ColorMaterial { color: Color::WHITE, ..Default::default() })
 }
 
 #[cfg(test)]

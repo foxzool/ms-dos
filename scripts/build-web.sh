@@ -20,7 +20,7 @@ wasm-opt -Oz \
 mv web/msdos_bg.wasm.opt web/msdos_bg.wasm
 
 echo "==> 内容寻址文件名"
-rm -f web/msdos_bg.*.wasm web/msdos_bg.wasm.d.ts web/msdos.d.ts
+rm -f web/msdos_bg.*.wasm web/msdos_bg.*.wasm.gz web/msdos_bg.wasm.d.ts web/msdos.d.ts
 gzip -9 -f web/msdos_bg.wasm
 HASH=$(md5 -q web/msdos_bg.wasm.gz | cut -c1-8)
 mv web/msdos_bg.wasm.gz "web/msdos_bg.$HASH.wasm.gz"

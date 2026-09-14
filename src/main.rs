@@ -385,14 +385,15 @@ fn setup_world(
             map.lines.len()
         );
         let origin = proj.project(clat, clon);
-        let spawned = map_render::spawn_map_layers_at(
+        let shared = map_render::white_vertex_material(&mut materials);
+        map_render::spawn_map_layers_at(
             &mut commands,
             &mut meshes,
             &mut materials,
-            map_render::build_map_layers(&map, &local),
+            map_render::build_map_mesh(&map, &local),
             origin,
+            &shared,
         );
-        let _ = spawned;
         let w_min = data_proj.unproject(map.min);
         let w_max = data_proj.unproject(map.max);
         let (s_, w_) = (w_min.0.min(w_max.0), w_min.1.min(w_max.1));
@@ -509,6 +510,7 @@ fn render_image_trigger(
     cache: Option<Res<tiles::TileCache>>,
     live: Res<tiles::LiveMap>,
     mut frames: Local<u32>,
+    mut stable: Local<u32>,
 ) {
     let Some(job) = job else { return };
     *frames += 1;
@@ -517,9 +519,14 @@ fn render_image_trigger(
         .as_ref()
         .map(|h| server.is_loaded_with_dependencies(h))
         .unwrap_or(true);
-    // 实时瓦片模式：至少 1 块加载完成且无在途请求（300 秒兜底超时）；静态模式直接就绪
+    // 实时瓦片模式：加载完成且无在途请求需稳定 90 帧（约 1.5s），
+    // 避免在请求节流的间隙（inflight 短暂归零）截图到半成品
     let tiles_ready = match (&cache, live.enabled) {
-        (Some(c), true) => c.inflight == 0 && (c.loaded_count() > 0 || *frames > 18_000),
+        (Some(c), true) => {
+            let ok = c.inflight == 0 && (c.loaded_count() > 0 || *frames > 18_000);
+            *stable = if ok { stable.saturating_add(1) } else { 0 };
+            *stable >= 90
+        }
         _ => true,
     };
     if *frames > 30 && asset_ready && tiles_ready {

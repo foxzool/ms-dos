@@ -19,7 +19,7 @@ use bevy::window::{PrimaryWindow, Window};
 use crate::camera::CameraRig;
 use crate::geo::Projection;
 use crate::globe::DataRing;
-use crate::map_render::{build_map_layers, spawn_map_layers_at, MapLayer};
+use crate::map_render::{build_map_mesh, spawn_map_layers_at, white_vertex_material};
 use crate::mvt::{decode_mvt, mvt_to_mapdata};
 use crate::MapCtx;
 
@@ -239,7 +239,7 @@ fn store_cached(_k: TileKey, _data: &[u8]) {}
 // ---------- 瓦片载荷 ----------
 
 pub struct TilePayload {
-    pub layers: Vec<MapLayer>,
+    pub mesh: bevy::prelude::Mesh,
     pub origin: Vec2,
     pub n_polys: usize,
     pub n_lines: usize,
@@ -307,15 +307,15 @@ pub fn build_tile_payload(k: TileKey, mvt_bytes: &[u8]) -> Result<TilePayload, S
     map.max = half;
     let (clat, clon) = tile_center_latlon(k);
     let local_proj = Projection::new(clat, clon);
-    let layers = build_map_layers(&map, &local_proj);
-    Ok(TilePayload { layers, origin: center, n_polys, n_lines })
+    let mesh = build_map_mesh(&map, &local_proj);
+    Ok(TilePayload { mesh, origin: center, n_polys, n_lines })
 }
 
 // ---------- 缓存与状态 ----------
 
 enum TileStatus {
     Fetching(Task<Result<TilePayload, String>>),
-    Loaded(Vec<crate::map_render::SpawnedMapLayer>),
+    Loaded(crate::map_render::SpawnedMapLayer),
     Failed { retry_at: f32 },
 }
 
@@ -428,12 +428,14 @@ pub fn tile_stream_system(
         cache.inflight = cache.inflight.saturating_sub(1);
         match result {
             Ok(payload) => {
+                let shared = white_vertex_material(&mut materials);
                 let spawned = spawn_map_layers_at(
                     &mut commands,
                     &mut meshes,
                     &mut materials,
-                    payload.layers,
+                    payload.mesh,
                     payload.origin,
+                    &shared,
                 );
                 eprintln!(
                     "[tile {}/{}/{}] 加载完成: {} 面 / {} 线",
@@ -492,14 +494,12 @@ pub fn tile_stream_system(
             break;
         }
         if let Some(TileStatus::Loaded(spawned)) = cache.tiles.remove(&victim) {
-            for layer in spawned {
-                commands.entity(layer.entity).despawn();
-                let (mesh, mat) = (layer.mesh, layer.material);
-                commands.queue(move |world: &mut bevy::ecs::world::World| {
-                    world.resource_mut::<Assets<Mesh>>().remove(mesh.id());
-                    world.resource_mut::<Assets<ColorMaterial>>().remove(mat.id());
-                });
-            }
+            commands.entity(spawned.entity).despawn();
+            let mesh = spawned.mesh;
+            // 共享材质不回收（其他瓦片在用）
+            commands.queue(move |world: &mut bevy::ecs::world::World| {
+                world.resource_mut::<Assets<Mesh>>().remove(mesh.id());
+            });
             eprintln!("[tile {}/{}/{}] LRU 卸载", victim.z, victim.x, victim.y);
         }
     }
