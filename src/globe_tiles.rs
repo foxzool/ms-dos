@@ -14,7 +14,7 @@ use bevy::ecs::entity::Entity;
 use bevy::ecs::resource::Resource;
 use bevy::ecs::system::{Commands, Query, Res, ResMut};
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
+use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::asset::RenderAssetUsages;
 use bevy::tasks::{futures::now_or_never, IoTaskPool, Task};
 
@@ -161,6 +161,11 @@ pub struct GlobeKey {
     pub y: u32,
 }
 
+#[derive(Component)]
+pub(crate) struct GlobeTileMesh {
+    key: GlobeKey,
+}
+
 enum GlobeStatus {
     Fetching(Task<Result<GlobeTilePayload, String>>),
     Loaded { entity: Entity },
@@ -195,6 +200,24 @@ pub fn globe_zoom_for(distance: f32) -> u8 {
     z.clamp(0.0, GIBS_MAX_Z as f64) as u8
 }
 
+/// 粗瓦片是否被目标级别下它覆盖的子网格“完全加载”——完全覆盖才隐藏，
+/// 避免新旧级别同半径 z-fighting 闪替，同时保证未加载完成前旧瓦片兜底显示。
+fn fully_covered_by_target(key: GlobeKey, z_target: u8, tiles: &HashMap<GlobeKey, GlobeStatus>) -> bool {
+    if key.z >= z_target {
+        return false;
+    }
+    let n = 1u32 << (z_target - key.z);
+    for ty in 0..n {
+        for tx in 0..n {
+            let k = GlobeKey { z: z_target, x: key.x * n + tx, y: key.y * n + ty };
+            if !matches!(tiles.get(&k), Some(GlobeStatus::Loaded { .. })) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// 主系统：按 GlobeRig 加载/卸载/收割球面贴图瓦片
 pub fn globe_tile_system(
     mut commands: Commands,
@@ -205,6 +228,7 @@ pub fn globe_tile_system(
     cams: Query<&Transform, With<GlobeCamera>>,
     time: Res<Time>,
     mut cache: ResMut<GlobeTileCache>,
+    mut q_tiles: Query<(&GlobeTileMesh, &mut Visibility)>,
 ) {
     let Ok(cam_t) = cams.single() else { return };
     let z = globe_zoom_for(rig.distance);
@@ -236,7 +260,13 @@ pub fn globe_tile_system(
                     ..default()
                 });
                 let entity = commands
-                    .spawn((Mesh3d(mesh), bevy::pbr::MeshMaterial3d(mat), Transform::default(), Visibility::Visible))
+                    .spawn((
+                        Mesh3d(mesh),
+                        bevy::pbr::MeshMaterial3d(mat),
+                        Transform::default(),
+                        Visibility::Hidden, // 可见性由下方“祖先隐藏”逻辑逐帧决定
+                        GlobeTileMesh { key: k },
+                    ))
                     .id();
                 cache.tiles.insert(k, GlobeStatus::Loaded { entity });
                 cache.lru.push_back(k);
@@ -284,6 +314,15 @@ pub fn globe_tile_system(
         }
     }
 
+    // ---- 可见性：被更细级别覆盖的祖先瓦片隐藏（消除新旧级别同半径闪替） ----
+    for (m, mut vis) in &mut q_tiles {
+        *vis = if fully_covered_by_target(m.key, z, &cache.tiles) {
+            Visibility::Hidden
+        } else {
+            Visibility::Visible
+        };
+    }
+
     // ---- LRU 卸载 ----
     let mut attempts = cache.lru.len();
     while cache.lru.len() > MAX_TILES && attempts > 0 {
@@ -302,6 +341,28 @@ pub fn globe_tile_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::render::mesh::VertexAttributeValues;
+
+    #[test]
+    fn coarse_tile_hidden_only_when_fully_covered() {
+        let mut tiles = HashMap::new();
+        let ent = Entity::PLACEHOLDER;
+        // z4(2,1) 是 z5(4,2)/(4,3)/(5,2)/(5,3) 四个子块的祖先
+        let coarse = GlobeKey { z: 4, x: 2, y: 1 };
+        // 全部未加载：不隐藏
+        assert!(!fully_covered_by_target(coarse, 5, &tiles));
+        // 三个子块加载：仍不隐藏（需完全覆盖）
+        for (x, y) in [(4, 2), (5, 2), (4, 3)] {
+            tiles.insert(GlobeKey { z: 5, x, y }, GlobeStatus::Loaded { entity: ent });
+        }
+        assert!(!fully_covered_by_target(coarse, 5, &tiles));
+        // 第四个子块加载后：隐藏
+        tiles.insert(GlobeKey { z: 5, x: 5, y: 3 }, GlobeStatus::Loaded { entity: ent });
+        assert!(fully_covered_by_target(coarse, 5, &tiles));
+        // 目标级别不高于自身：不隐藏（更高精细缓存直接显示）
+        assert!(!fully_covered_by_target(GlobeKey { z: 5, x: 4, y: 2 }, 5, &tiles));
+        assert!(!fully_covered_by_target(coarse, 4, &tiles));
+    }
 
     /// 顶点纬度必须按 Web Mercator 插值（与贴图行对齐），而非线性纬度：
     /// 线性中点会显著低于 Mercator 中点（极区瓦片尤甚）。
