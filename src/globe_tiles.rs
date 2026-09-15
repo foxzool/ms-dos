@@ -7,7 +7,7 @@
 //! - 异步下载 + 桌面磁盘缓存 + LRU（复用瓦片流架构）；
 //! - 远景（全球）回落到内嵌底图球，瓦片层隐藏。
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use bevy::asset::Assets;
 use bevy::ecs::entity::Entity;
@@ -189,6 +189,24 @@ pub fn globe_zoom_for(distance: f32) -> u8 {
     z.clamp(0.0, GIBS_MAX_Z as f64) as u8
 }
 
+/// 仍处于 Failed/Fetching 的瓦片的所有祖先键——它们是这些未就绪区域的兜底显示，
+/// 不得被 LRU 淘汰（否则失败区域露出内嵌底图形成空洞）。
+fn fallback_protected(tiles: &HashMap<GlobeKey, GlobeStatus>) -> HashSet<GlobeKey> {
+    let mut protected = HashSet::new();
+    for (k, st) in tiles {
+        if !matches!(st, GlobeStatus::Failed { .. } | GlobeStatus::Fetching(_)) {
+            continue;
+        }
+        let mut z = k.z;
+        while z > 0 {
+            z -= 1;
+            let d = k.z - z;
+            protected.insert(GlobeKey { z, x: k.x >> d, y: k.y >> d });
+        }
+    }
+    protected
+}
+
 /// 粗瓦片是否被目标级别下它覆盖的子网格“完全加载”——完全覆盖才隐藏，
 /// 避免新旧级别同半径 z-fighting 闪替，同时保证未加载完成前旧瓦片兜底显示。
 fn fully_covered_by_target(key: GlobeKey, z_target: u8, tiles: &HashMap<GlobeKey, GlobeStatus>) -> bool {
@@ -312,12 +330,13 @@ pub fn globe_tile_system(
         };
     }
 
-    // ---- LRU 卸载 ----
+    // ---- LRU 卸载（wanted 与“失败/加载中区域的兜底祖先”都不可踢） ----
+    let protected = fallback_protected(&cache.tiles);
     let mut attempts = cache.lru.len();
     while cache.lru.len() > MAX_TILES && attempts > 0 {
         attempts -= 1;
         let Some(victim) = cache.lru.pop_front() else { break };
-        if wanted.contains(&victim) {
+        if wanted.contains(&victim) || protected.contains(&victim) {
             cache.lru.push_back(victim);
             continue;
         }
@@ -351,6 +370,24 @@ mod tests {
         // 目标级别不高于自身：不隐藏（更高精细缓存直接显示）
         assert!(!fully_covered_by_target(GlobeKey { z: 5, x: 4, y: 2 }, 5, &tiles));
         assert!(!fully_covered_by_target(coarse, 4, &tiles));
+    }
+
+    #[test]
+    fn failed_tiles_protect_their_ancestors_from_eviction() {
+        let mut tiles = HashMap::new();
+        let ent = Entity::PLACEHOLDER;
+        // z5(4,2) 失败 → 其祖先 z4(2,1)/z3(1,0)/…/z0 全部受保护
+        tiles.insert(GlobeKey { z: 5, x: 4, y: 2 }, GlobeStatus::Failed { retry_at: 1.0 });
+        let protected = fallback_protected(&tiles);
+        assert!(protected.contains(&GlobeKey { z: 4, x: 2, y: 1 }));
+        assert!(protected.contains(&GlobeKey { z: 3, x: 1, y: 0 }));
+        assert!(protected.contains(&GlobeKey { z: 0, x: 0, y: 0 }));
+        // 兄弟分支不受保护
+        assert!(!protected.contains(&GlobeKey { z: 4, x: 3, y: 1 }));
+        // Loaded/实体键不产生保护
+        let mut clean = HashMap::new();
+        clean.insert(GlobeKey { z: 5, x: 4, y: 2 }, GlobeStatus::Loaded { entity: ent });
+        assert!(fallback_protected(&clean).is_empty());
     }
 
     /// 顶点纬度必须按 Web Mercator 插值（与贴图行对齐），而非线性纬度：
