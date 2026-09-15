@@ -228,13 +228,7 @@ fn store_cached(k: TileKey, data: &[u8]) {
     store_cached_in(&cache_dir(), k, data)
 }
 
-#[cfg(target_arch = "wasm32")]
-fn load_cached(_k: TileKey) -> Option<Vec<u8>> {
-    None
-}
 
-#[cfg(target_arch = "wasm32")]
-fn store_cached(_k: TileKey, _data: &[u8]) {}
 
 // ---------- 球面贴图瓦片共用的磁盘缓存（tile_z_x_y.img 命名空间） ----------
 
@@ -262,14 +256,6 @@ pub fn store_cached_tile_bytes(z: u8, x: u32, y: u32, data: &[u8]) {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-pub fn load_cached_tile_bytes(_z: u8, _x: u32, _y: u32) -> Option<Vec<u8>> {
-    None
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn store_cached_tile_bytes(_z: u8, _x: u32, _y: u32, _data: &[u8]) {}
-
 // ---------- 瓦片载荷 ----------
 
 pub struct TilePayload {
@@ -285,6 +271,12 @@ pub async fn fetch_tile(k: TileKey, template: &str) -> Result<TilePayload, Strin
         .replace("{z}", &k.z.to_string())
         .replace("{x}", &k.x.to_string())
         .replace("{y}", &k.y.to_string());
+    #[cfg(target_arch = "wasm32")]
+    let bytes = {
+        let key = crate::web_cache::ofm_cache_key(k.z as u8, k.x as u32, k.y as u32);
+        crate::web_cache::cached_fetch(&url, &key).await?
+    };
+    #[cfg(not(target_arch = "wasm32"))]
     let bytes = match load_cached(k) {
         Some(b) => b,
         None => {

@@ -19,6 +19,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::tasks::{futures::now_or_never, IoTaskPool, Task};
 
 use crate::globe::{lat_lon_to_vec3, GlobeCamera, GlobeRig, GLOBE_RADIUS};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::tiles::{load_cached_tile_bytes, store_cached_tile_bytes};
 
 const GIBS_TEMPLATE: &str = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/BlueMarble_ShadedRelief_Bathymetry/default/GoogleMapsCompatible_Level8";
@@ -103,30 +104,18 @@ async fn fetch_gibs(url: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("读取失败: {e}"))
 }
 
-#[cfg(target_arch = "wasm32")]
-async fn fetch_gibs(url: &str) -> Result<Vec<u8>, String> {
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen_futures::JsFuture;
-    let window = web_sys::window().ok_or("无 window")?;
-    let resp_val = JsFuture::from(window.fetch_with_str(url))
-        .await
-        .map_err(|e| format!("网络失败: {e:?}"))?;
-    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "响应类型异常")?;
-    if !resp.ok() {
-        return Err(format!("HTTP {}", resp.status()));
-    }
-    let buf = JsFuture::from(resp.array_buffer().map_err(|e| format!("{e:?}"))?)
-        .await
-        .map_err(|e| format!("读取失败: {e:?}"))?;
-    Ok(js_sys::Uint8Array::new(&buf).to_vec())
-}
-
 pub struct GlobeTilePayload {
     pub image: bevy::image::Image,
 }
 
 pub async fn fetch_globe_tile(z: u8, x: u32, y: u32) -> Result<GlobeTilePayload, String> {
     let url = format!("{GIBS_TEMPLATE}/{z}/{y}/{x}.jpg");
+    #[cfg(target_arch = "wasm32")]
+    let bytes = {
+        let key = crate::web_cache::gibs_cache_key(z, x, y);
+        crate::web_cache::cached_fetch(&url, &key).await?
+    };
+    #[cfg(not(target_arch = "wasm32"))]
     let bytes = match load_cached_tile_bytes(z, x, y) {
         Some(b) => b,
         None => {

@@ -29,7 +29,7 @@ flate2 = "1"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Request", "RequestInit", "Response", "Location", "History"] }
+web-sys = { version = "0.3", features = ["Window", "Request", "RequestInit", "Response", "Location", "History", "Cache", "CacheStorage"] }
 js-sys = "0.3"
 
 [dependencies.image]

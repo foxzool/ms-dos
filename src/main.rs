@@ -15,6 +15,7 @@ mod osm;
 mod satellites;
 mod sim;
 mod tiles;
+mod web_cache;
 mod timeline;
 mod units_render;
 mod weburl;
