@@ -218,7 +218,7 @@ pub fn build_timeline(mut commands: Commands) {
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(10.0),
-                top: Val::Px(8.0),
+                bottom: Val::Px(30.0),
                 ..default()
             },
         ))
@@ -230,7 +230,7 @@ pub fn build_timeline(mut commands: Commands) {
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(10.0),
-                top: Val::Px(30.0),
+                bottom: Val::Px(10.0),
                 ..default()
             },
         ))
@@ -241,7 +241,7 @@ pub fn build_timeline(mut commands: Commands) {
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(PAD_L),
-                top: Val::Px(36.0),
+                bottom: Val::Px(17.0),
                 width: Val::Px(200.0),
                 height: Val::Px(3.0),
                 ..default()
@@ -255,7 +255,7 @@ pub fn build_timeline(mut commands: Commands) {
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(PAD_L),
-                top: Val::Px(14.0),
+                bottom: Val::Px(14.0),
                 width: Val::Px(9.0),
                 height: Val::Px(28.0),
                 ..default()
@@ -273,7 +273,7 @@ pub fn build_timeline(mut commands: Commands) {
             Node {
                 position_type: PositionType::Absolute,
                 right: Val::Px(16.0),
-                top: Val::Px(4.0),
+                bottom: Val::Px(44.0),
                 ..default()
             },
         ))

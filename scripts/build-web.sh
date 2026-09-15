@@ -25,7 +25,7 @@ gzip -9 -f web/msdos_bg.wasm
 HASH=$(md5 -q web/msdos_bg.wasm.gz | cut -c1-8)
 mv web/msdos_bg.wasm.gz "web/msdos_bg.$HASH.wasm.gz"
 # 替换 index.html 中任意旧 hash（支持重复构建）
-sed -i '' -E "s#msdos_bg\.[a-f0-9]+\.wasm(\.gz)?#msdos_bg.$HASH.wasm.gz#g; s#msdos.js\?v=[a-f0-9]*#msdos.js?v=$HASH#g" web/index.html
+sed -i '' -E "s#msdos_bg\.[a-z0-9.]+\.wasm(\.gz)?#msdos_bg.$HASH.wasm.gz#g; s#msdos.js\?v=[a-z0-9.]*#msdos.js?v=$HASH#g" web/index.html
 
 if [[ "${1:-}" == "--deploy" ]]; then
   echo "==> 部署到 Cloudflare Pages"

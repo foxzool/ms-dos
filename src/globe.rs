@@ -224,6 +224,10 @@ pub fn setup_globe(
         bevy::core_pipeline::tonemapping::Tonemapping::None,
         GlobeCamera,
         Camera { is_active: true, ..default() },
+        // WebGL2 下 MSAA 破坏同相机 UI pass，相机级关闭
+        Msaa::Off,
+        // UI 渲染挂活跃相机：Globe 态由 3D 相机承载（切换见 enter_*_cameras）
+        bevy::ui::IsDefaultUiCamera,
         Projection::Perspective(PerspectiveProjection {
             fov: GLOBE_FOV,
             near: 10_000.0,
@@ -423,26 +427,32 @@ pub fn map_takeoff(
 // ---------- 相机激活 ----------
 
 pub fn enter_globe_cameras(
-    mut q2d: Query<&mut Camera, (With<Camera2d>, Without<GlobeCamera>)>,
-    mut q3d: Query<&mut Camera, With<GlobeCamera>>,
+    mut commands: Commands,
+    mut q2d: Query<(Entity, &mut Camera), (With<Camera2d>, Without<GlobeCamera>)>,
+    mut q3d: Query<(Entity, &mut Camera), With<GlobeCamera>>,
 ) {
-    for mut c in &mut q2d {
+    for (e, mut c) in &mut q2d {
         c.is_active = false;
+        commands.entity(e).remove::<bevy::ui::IsDefaultUiCamera>();
     }
-    for mut c in &mut q3d {
+    for (e, mut c) in &mut q3d {
         c.is_active = true;
+        commands.entity(e).insert(bevy::ui::IsDefaultUiCamera);
     }
 }
 
 pub fn enter_map_cameras(
-    mut q2d: Query<&mut Camera, (With<Camera2d>, Without<GlobeCamera>)>,
-    mut q3d: Query<&mut Camera, With<GlobeCamera>>,
+    mut commands: Commands,
+    mut q2d: Query<(Entity, &mut Camera), (With<Camera2d>, Without<GlobeCamera>)>,
+    mut q3d: Query<(Entity, &mut Camera), With<GlobeCamera>>,
 ) {
-    for mut c in &mut q2d {
+    for (e, mut c) in &mut q2d {
         c.is_active = true;
+        commands.entity(e).insert(bevy::ui::IsDefaultUiCamera);
     }
-    for mut c in &mut q3d {
+    for (e, mut c) in &mut q3d {
         c.is_active = false;
+        commands.entity(e).remove::<bevy::ui::IsDefaultUiCamera>();
     }
 }
 

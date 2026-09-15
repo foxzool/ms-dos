@@ -7,7 +7,14 @@ license = "MIT"
 
 [dependencies]
 bevy = { version = "0.19.1", default-features = false, features = [
-    "2d", "3d", "ui", "jpeg",
+    "bevy_asset", "bevy_log", "bevy_state", "async_executor",
+    "std", "bevy_winit", "default_font", "multi_threaded", "webgl2",
+    "bevy_camera", "bevy_color", "bevy_image", "bevy_mesh", "bevy_shader", "bevy_material", "bevy_text", "bevy_window",
+    "bevy_sprite", "bevy_sprite_render",
+    "bevy_render", "bevy_core_pipeline",
+    "bevy_input_focus", "bevy_ui", "bevy_ui_render",
+    "bevy_pbr",
+    "jpeg",
 ] }
 quick-xml = "0.38"
 earcut = "0.4"

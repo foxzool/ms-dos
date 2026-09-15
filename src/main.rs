@@ -495,7 +495,12 @@ fn setup_world(
     match *mode {
         RenderMode::Window => {
             // 地球起始：2D 相机先失活，地球相机激活（初始状态 Globe）
-            commands.spawn((Camera2d, Camera { is_active: false, ..default() }));
+            // WebGL2 下 MSAA4x 破坏 UI pass（经典兼容问题），相机级关闭
+            commands.spawn((
+                Camera2d,
+                Camera { is_active: false, ..default() },
+                Msaa::Off,
+            ));
             globe::setup_globe(&mut commands, &mut meshes, &mut std_materials, &earth, None);
         }
         RenderMode::ImageMap => {
