@@ -15,6 +15,7 @@ mod osm;
 mod satellites;
 mod sim;
 mod tiles;
+mod timeline;
 mod units_render;
 mod weburl;
 mod ui;
@@ -220,6 +221,7 @@ fn main() {
         .add_plugins(CameraPlugin)
         .add_plugins(InputPlugin)
         .add_plugins(UiPlugin)
+        .add_systems(bevy::app::PostStartup, timeline::build_timeline)
         .add_systems(OnEnter(globe::AppState::Globe), globe::enter_globe_cameras)
         .add_systems(OnEnter(globe::AppState::Map), globe::enter_map_cameras)
         .add_systems(
@@ -257,6 +259,7 @@ fn main() {
         )
         .init_resource::<globe_tiles::GlobeTileCache>()
         .init_resource::<satellites::SatLayer>()
+        .init_resource::<timeline::TimeWindow>()
         .add_systems(
             Update,
             globe_tiles::globe_tile_system.run_if(in_state(globe::AppState::Globe)),
@@ -266,6 +269,10 @@ fn main() {
             satellites::sat_stream_system.run_if(in_state(globe::AppState::Globe)),
         )
         .add_systems(Update, globe::map_takeoff.run_if(in_state(globe::AppState::Map)))
+        .add_systems(
+            Update,
+            (timeline::timeline_system, timeline::timeline_hit_zone).chain(),
+        )
         .add_systems(
             Update,
             tiles::tile_stream_system.run_if(in_state(globe::AppState::Map)),

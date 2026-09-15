@@ -25,6 +25,8 @@ const CONTACT_W: f32 = 256.0;
 const CONTACT_H: f32 = 330.0;
 const PANEL_W: f32 = 396.0;
 const PANEL_H: f32 = 176.0;
+/// 底部时间轴高度（避让）
+const TIMELINE_H: f32 = 56.0;
 const ROWS: usize = 14;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -166,7 +168,7 @@ pub fn build_ui(mut commands: Commands) {
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(8.0),
-                bottom: Val::Px(8.0),
+                bottom: Val::Px(TIMELINE_H + 8.0),
                 width: Val::Px(PANEL_W),
                 height: Val::Px(PANEL_H),
                 flex_direction: FlexDirection::Column,
@@ -463,7 +465,7 @@ pub fn update_ui(
             Rect::new(win_w - CONTACT_W - 16.0, BAR_H + 8.0, win_w, BAR_H + 8.0 + CONTACT_H),
             "contacts",
         ),
-        (Rect::new(0.0, win_h - PANEL_H - 16.0, PANEL_W + 16.0, win_h), "unitpanel"),
+        (Rect::new(0.0, win_h - PANEL_H - 16.0 - TIMELINE_H, PANEL_W + 16.0, win_h - TIMELINE_H), "unitpanel"),
     ];
 }
 

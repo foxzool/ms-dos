@@ -17,10 +17,10 @@
 <div id="app"><canvas id="msdos-canvas"></canvas></div>
 <div id="loading">LOADING MIAOSUAN DOS…</div>
 <script type="module">
-  import init from './msdos.js?v=95aab8cb';
+  import init from './msdos.js?v=79febe17';
   // wasm 以 gzip 预压缩分发（绕过 CF Pages 25MiB 单文件限制），浏览器端解压
   async function boot() {
-    const resp = await fetch('./msdos_bg.95aab8cb.wasm.gz');
+    const resp = await fetch('./msdos_bg.79febe17.wasm.gz');
     if (!resp.ok) throw new Error('wasm 下载失败: HTTP ' + resp.status);
     const ds = new DecompressionStream('gzip');
     const inflated = await new Response(resp.body.pipeThrough(ds)).arrayBuffer();

@@ -106,9 +106,14 @@ fn wheel_zoom(
     mut rig: ResMut<CameraRig>,
     scroll: Res<AccumulatedMouseScroll>,
     cursor: Res<CursorState>,
+    zones: Res<crate::input::UiHitZones>,
     window: Query<&Window, With<PrimaryWindow>>,
 ) {
     if scroll.delta.y.abs() < 1e-4 {
+        return;
+    }
+    // UI 区域（时间轴等）内的滚轮不缩放地图
+    if cursor.screen.map(|c| zones.zones.iter().any(|(r, _)| r.contains(c))).unwrap_or(false) {
         return;
     }
     let Ok(w) = window.single() else { return };
