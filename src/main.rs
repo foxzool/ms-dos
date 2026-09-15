@@ -61,6 +61,7 @@ pub enum RenderMode {
 #[derive(Resource)]
 struct Launch {
     globe_alt: Option<f32>,
+    globe_view: Option<(f32, f32, Option<f32>)>,
     map_path: Option<String>,
     screenshot: Option<String>,
     render_image: Option<String>,
@@ -93,8 +94,10 @@ struct RenderImageDone(bool);
 
 fn parse_args() -> Launch {
     let mut globe_alt: Option<f32> = None;
+    let mut globe_view: Option<(f32, f32, Option<f32>)> = None;
     let mut launch = Launch {
         globe_alt: None,
+        globe_view: None,
         map_path: None,
         screenshot: None,
         render_image: None,
@@ -149,6 +152,15 @@ fn parse_args() -> Launch {
                     globe_alt = v.parse().ok();
                 }
             }
+            "--globe-view" => {
+                // lat,lon[,alt_m]：诊断用初始地球视角
+                if let Some(v) = it.next() {
+                    let p: Vec<f32> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+                    if p.len() >= 2 {
+                        globe_view = Some((p[0], p[1], p.get(2).copied()));
+                    }
+                }
+            }
             "--zoom" => {
                 if let Some(v) = it.next() {
                     launch.zoom = v.parse().ok();
@@ -158,6 +170,7 @@ fn parse_args() -> Launch {
         }
     }
     launch.globe_alt = globe_alt;
+    launch.globe_view = globe_view;
     launch
 }
 
@@ -167,6 +180,7 @@ fn main() {
 
     let launch = parse_args();
     let globe_alt = launch.globe_alt;
+    let diag_view = launch.globe_view;
     let mode = if launch.selftest_ui {
         RenderMode::Selftest
     } else if launch.render_globe {
@@ -287,6 +301,15 @@ fn main() {
     if let Some(alt) = globe_alt {
         let mut rig = app.world_mut().resource_mut::<globe::GlobeRig>();
         rig.distance = globe::GLOBE_RADIUS + alt;
+    }
+    // 诊断/验证：--globe-view lat,lon[,alt] 指定初始地球视角
+    if let Some((lat, lon, alt)) = diag_view {
+        let mut rig = app.world_mut().resource_mut::<globe::GlobeRig>();
+        rig.lat = lat.clamp(-89.0, 89.0);
+        rig.lon = lon;
+        if let Some(a) = alt {
+            rig.distance = globe::GLOBE_RADIUS + a;
+        }
     }
 
     // 地球贴图内嵌进二进制（wasm 免网络加载、免 .meta 探测；桌面端同样可用）

@@ -14,7 +14,7 @@ use bevy::ecs::entity::Entity;
 use bevy::ecs::resource::Resource;
 use bevy::ecs::system::{Commands, Query, Res, ResMut};
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
+use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
 use bevy::asset::RenderAssetUsages;
 use bevy::tasks::{futures::now_or_never, IoTaskPool, Task};
 
@@ -30,15 +30,19 @@ const REQUEST_INTERVAL: f32 = 0.1;
 
 // ---------- 球面分区网格 ----------
 
-/// Web Mercator XYZ 瓦片的球面 patch 网格（经纬细分，法线朝外）
+/// Web Mercator XYZ 瓦片的球面 patch 网格（经纬细分，法线朝外）。
+/// 顶点纬度按 Mercator y 均匀插值——与贴图像素行严格对齐；
+/// 若按线性纬度插值，y=0 行（极区）瓦片纹理会被拉伸错位（冰盖形状变形）。
 pub fn globe_patch_mesh(z: u8, x: u32, y: u32, radius: f32, seg_x: usize, seg_y: usize) -> Mesh {
     let (lat_s, lon_w, lat_n, lon_e) = tile_bbox(z, x, y);
+    let merc_n = lat_n.to_radians().tan().asinh();
+    let merc_s = lat_s.to_radians().tan().asinh();
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut normals: Vec<[f32; 3]> = Vec::new();
     let mut uvs: Vec<[f32; 2]> = Vec::new();
     for j in 0..=seg_y {
         let v = j as f64 / seg_y as f64;
-        let lat = lat_s + (lat_n - lat_s) * v;
+        let lat = (merc_s + (merc_n - merc_s) * v).sinh().atan().to_degrees();
         for i in 0..=seg_x {
             let u = i as f64 / seg_x as f64;
             let lon = lon_w + (lon_e - lon_w) * u;
@@ -292,5 +296,27 @@ pub fn globe_tile_system(
         if let Some(GlobeStatus::Loaded { entity }) = cache.tiles.remove(&victim) {
             commands.entity(entity).despawn();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 顶点纬度必须按 Web Mercator 插值（与贴图行对齐），而非线性纬度：
+    /// 线性中点会显著低于 Mercator 中点（极区瓦片尤甚）。
+    #[test]
+    fn patch_vertices_follow_mercator() {
+        let m = globe_patch_mesh(5, 0, 0, 1.0, 4, 8);
+        let pos = m.attribute(Mesh::ATTRIBUTE_POSITION).expect("应有位置属性");
+        let VertexAttributeValues::Float32x3(vals) = pos else { panic!("位置应为 Float32x3") };
+        let to_lat = |j: usize| (vals[j * 5][1] as f32).asin().to_degrees();
+        let (_lat_s, _lon_w, lat_n, _lon_e) = tile_bbox(5, 0, 0);
+        // 中点纬度高于线性中点（Mercator 在北侧聚集）
+        let south = (std::f64::consts::PI - 1.0f64 / 32.0 * std::f64::consts::TAU)
+            .sinh().atan().to_degrees();
+        let linear_mid = (lat_n + south) / 2.0;
+        assert!(to_lat(4) > linear_mid as f32, "中点纬度 {} 应高于线性中点 {}", to_lat(4), linear_mid);
+        assert!(to_lat(8) <= lat_n as f32 + 1e-3, "北边行不应越过瓦片北界");
     }
 }
