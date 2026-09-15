@@ -197,8 +197,13 @@ pub struct SatLayer {
     pub visible: bool,
     set: Option<Arc<SatelliteSet>>,
     fetch: Option<Task<Option<SatelliteSet>>>,
-    tried: bool,
+    /// 失败后的下次重试时刻（elapsed 秒）；请求进行中为无穷大。
+    /// 此前是一次性 tried 标志——TLE 一次网络失败后整个会话不再尝试。
+    retry_at: f32,
 }
+
+/// TLE 拉取失败后的重试间隔
+const TLE_RETRY_SECS: f32 = 30.0;
 
 impl SatLayer {
     pub fn sat_count(&self) -> usize {
@@ -232,7 +237,7 @@ pub fn sat_stream_system(
     if keys.just_pressed(KeyCode::KeyS) {
         layer.visible = !layer.visible;
     }
-    // ---- 拉取 TLE（一次） ----
+    // ---- 拉取 TLE（失败后定期重试） ----
     if layer.set.is_none() {
         if let Some(task) = layer.fetch.as_mut() {
             if let Some(result) = now_or_never(&mut *task) {
@@ -241,11 +246,12 @@ pub fn sat_stream_system(
                     eprintln!("[sat] 加载 {} 颗卫星（ISS index {:?}）", set.sats.len(), set.iss_index);
                     layer.set = Some(Arc::new(set));
                 } else {
-                    eprintln!("[sat] TLE 获取失败，跳过卫星层");
+                    eprintln!("[sat] TLE 获取失败，{}s 后重试", TLE_RETRY_SECS);
+                    layer.retry_at = time.elapsed_secs() + TLE_RETRY_SECS;
                 }
             }
-        } else if !layer.tried {
-            layer.tried = true;
+        } else if time.elapsed_secs() >= layer.retry_at {
+            layer.retry_at = f32::INFINITY; // 请求进行中
             layer.visible = true;
             layer.fetch = Some(IoTaskPool::get().spawn(async { fetch_satellite_set().await }));
             return;
