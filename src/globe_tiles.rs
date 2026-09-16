@@ -109,12 +109,19 @@ pub struct GlobeTilePayload {
     pub image: bevy::image::Image,
 }
 
+/// JPEG 流完整性：正常 JPEG 以 EOI（FF D9）结尾。
+/// GIBS 限流期间会返回 HTTP 200 但截断的 JPEG，容错解码器把缺失部分填白——
+/// 不校验就会把“纯白坏瓦片”当作有效影像渲染并缓存。
+fn jpeg_complete(bytes: &[u8]) -> bool {
+    bytes.len() > 4 && bytes[bytes.len() - 2] == 0xFF && bytes[bytes.len() - 1] == 0xD9
+}
+
 pub async fn fetch_globe_tile(z: u8, x: u32, y: u32) -> Result<GlobeTilePayload, String> {
     let url = format!("{GIBS_TEMPLATE}/{z}/{y}/{x}.jpg");
     #[cfg(target_arch = "wasm32")]
     let bytes = {
         let key = crate::web_cache::gibs_cache_key(z, x, y);
-        crate::web_cache::cached_fetch(&url, &key).await?
+        crate::web_cache::cached_fetch_if(&url, &key, jpeg_complete).await?
     };
     #[cfg(not(target_arch = "wasm32"))]
     let bytes = match load_cached_tile_bytes(z, x, y) {
@@ -125,6 +132,9 @@ pub async fn fetch_globe_tile(z: u8, x: u32, y: u32) -> Result<GlobeTilePayload,
             raw
         }
     };
+    if !jpeg_complete(&bytes) {
+        return Err("截断的 JPEG（限流期间常见的 200 损坏响应）".into());
+    }
     // JPEG 解码
     let cursor = std::io::Cursor::new(&bytes);
     let img = image::ImageReader::with_format(cursor, image::ImageFormat::Jpeg)
@@ -363,6 +373,15 @@ pub fn globe_tile_system(
 mod tests {
     use super::*;
     use bevy::render::mesh::VertexAttributeValues;
+
+    #[test]
+    fn truncated_jpeg_rejected() {
+        let full: &[u8] = &[0xFF, 0xD8, 0x00, 0x01, 0xFF, 0xD9];
+        assert!(jpeg_complete(full), "完整 JPEG（含 EOI）应通过");
+        let truncated: &[u8] = &[0xFF, 0xD8, 0x00, 0x01, 0x02];
+        assert!(!jpeg_complete(truncated), "截断 JPEG 应被拒绝");
+        assert!(!jpeg_complete(&[]), "空数据拒绝");
+    }
 
     #[test]
     fn level_ready_requires_full_hemisphere() {

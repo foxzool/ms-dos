@@ -10,12 +10,22 @@
 
 /// 缓存版本（内容格式变化时递增以整体失效）
 #[cfg(target_arch = "wasm32")]
-const CACHE_NAME: &str = "msdos-tiles-v1";
+const CACHE_NAME: &str = "msdos-tiles-v2";
 
 /// 先查 CacheStorage，miss 则网络请求并写回。缓存读写失败一律容忍（回退纯网络）。
 /// 仅 web 构建存在；桌面端调用点走磁盘缓存分支。
 #[cfg(target_arch = "wasm32")]
 pub async fn cached_fetch(url: &str, cache_key: &str) -> Result<Vec<u8>, String> {
+    cached_fetch_if(url, cache_key, |_| true).await
+}
+
+/// 带内容校验的缓存获取：校验失败的响应不写缓存（防止限流期的 200 损坏数据被永久缓存）
+#[cfg(target_arch = "wasm32")]
+pub async fn cached_fetch_if(
+    url: &str,
+    cache_key: &str,
+    valid: impl Fn(&[u8]) -> bool,
+) -> Result<Vec<u8>, String> {
     use wasm_bindgen::JsCast;
     use wasm_bindgen_futures::JsFuture;
 
@@ -59,8 +69,8 @@ pub async fn cached_fetch(url: &str, cache_key: &str) -> Result<Vec<u8>, String>
         .map_err(|e| format!("读取失败: {e:?}"))?;
     let bytes = js_sys::Uint8Array::new(&buf).to_vec();
 
-    // ---- 写回缓存（失败容忍） ----
-    {
+    // ---- 写回缓存（校验通过才写；失败容忍） ----
+    if valid(&bytes) {
         let cache_promise = caches.open(CACHE_NAME);
         if let Ok(cache_val) = JsFuture::from(cache_promise).await {
             if let Ok(cache) = cache_val.dyn_into::<web_sys::Cache>() {
