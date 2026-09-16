@@ -358,7 +358,7 @@ pub fn sat_stream_system(
     let unix = SCENARIO_EPOCH_UNIX + clock.t;
     let cam_dist = cam_t.translation.length();
     let r = sat_marker_radius(cam_dist, 7.0, vp_h);
-    let orbit_r = sat_marker_radius(cam_dist, 2.5, vp_h);
+    let orbit_r = sat_marker_radius(cam_dist, 1.2, vp_h);
     // 近距（接近落地阈值）时卫星层密集碍事，随视距自动淡出
     let near_hide = GLOBE_RADIUS * 1.15;
     let show = layer.visible && cam_dist > near_hide;
