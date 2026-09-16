@@ -218,24 +218,16 @@ pub(crate) fn polyline_strip(
 }
 
 
-/// 经纬网（默认 0.05 度间隔，跨数据外接框外扩 20%）
-pub fn graticule_lines(map: &MapData, proj: &Projection, step_deg: f64, width_m: f32) -> Vec<Line> {
-    let (mut min_lat, mut max_lat) = proj.unproject(map.min);
-    let (max_lat2, min_lat2) = proj.unproject(map.max);
-    min_lat = min_lat.min(min_lat2);
-    max_lat = max_lat.max(max_lat2);
-    let (mut min_lon, mut max_lon) = proj.unproject(Vec2::new(map.min.x, map.max.y));
-    let (lon2_max, lon2_min) = proj.unproject(Vec2::new(map.max.x, map.min.y));
-    min_lon = min_lon.min(lon2_min);
-    max_lon = max_lon.max(lon2_max);
-
-    let pad_lat = (max_lat - min_lat) * 0.2;
-    let pad_lon = (max_lon - min_lon) * 0.2;
-    min_lat -= pad_lat;
-    max_lat += pad_lat;
-    min_lon -= pad_lon;
-    max_lon += pad_lon;
-
+/// 经纬网线集（区域由经纬边界给定；等纬线/经线在 Web Mercator 下均为直线）
+pub fn graticule_lines_region(
+    proj: &Projection,
+    min_lat: f64,
+    min_lon: f64,
+    max_lat: f64,
+    max_lon: f64,
+    step_deg: f64,
+    width_m: f32,
+) -> Vec<Line> {
     let mut lines = Vec::new();
     let w = width_m;
     let mut lat = (min_lat / step_deg).ceil() * step_deg;
@@ -255,6 +247,59 @@ pub fn graticule_lines(map: &MapData, proj: &Projection, step_deg: f64, width_m:
     lines
 }
 
+/// 独立经纬网层：随真实视距重建（瓦片 mesh 内嵌的网格步长固定，无法随缩放自适应）
+#[derive(Component)]
+pub struct GraticuleLayer;
+
+#[derive(Resource, Default)]
+pub struct GraticuleState {
+    step: f64,
+    center: Vec2,
+}
+
+pub fn graticule_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut state: ResMut<GraticuleState>,
+    rig: Res<crate::camera::CameraRig>,
+    ctx: Res<crate::MapCtx>,
+    win: Query<&bevy::window::Window, With<bevy::window::PrimaryWindow>>,
+    old: Query<Entity, With<GraticuleLayer>>,
+) {
+    let (w, h) = win.single().map(|w| (w.width(), w.height())).unwrap_or((1600.0, 900.0));
+    let view_h_m = rig.mpp * h;
+    let view_w_m = rig.mpp * w;
+    let step = graticule_step_for_view(view_h_m, h);
+    // 步长变化或中心移出半屏（缓冲覆盖 1.5 屏）才重建
+    let need = GraticuleState { step, center: rig.target }.step != state.step
+        || state.center.distance(rig.target) > view_h_m.max(view_w_m) * 0.5;
+    if !need {
+        return;
+    }
+    for e in &old {
+        commands.entity(e).despawn();
+    }
+    let half = Vec2::new(view_w_m, view_h_m) * 0.75;
+    let (lat_s, lon_w) = ctx.proj.unproject(rig.target - half);
+    let (lat_n, lon_e) = ctx.proj.unproject(rig.target + half);
+    let lines = graticule_lines_region(&ctx.proj, lat_s, lon_w, lat_n, lon_e, step, rig.mpp * 1.2);
+    if lines.is_empty() {
+        *state = GraticuleState { step, center: rig.target };
+        return;
+    }
+    let mesh = meshes.add(line_mesh(&lines));
+    commands.spawn((
+        bevy::render::mesh::Mesh2d(mesh),
+        MeshMaterial2d(materials.add(ColorMaterial::from(palette::GRATICULE))),
+        // 网格画在瓦片层（z=0 平面）之上
+        Transform::from_xyz(0.0, 0.0, 0.5),
+        Visibility::Visible,
+        GraticuleLayer,
+    ));
+    *state = GraticuleState { step, center: rig.target };
+}
+
 /// 经纬网步长：按视距自适应（目标屏幕间距 ~110px），
 /// 度数取整到标准系列——避免低视距时 0.05° 固定网格密集成一片（Cesium 默认甚至不显示经纬网）。
 /// `bounds_m` 为视口高（米），`bounds_h_px` 为视口像素高。
@@ -263,18 +308,6 @@ pub fn graticule_step_for_view(bounds_m: f32, bounds_h_px: f32) -> f64 {
     // 屏幕间距 110px 对应的米数 → 近似度数（经度方向）
     let want_deg = (bounds_m / bounds_h_px.max(1.0) * 110.0) as f64 / 111_320.0;
     STEPS.iter().copied().find(|&s| s >= want_deg).unwrap_or(5.0)
-}
-
-/// 经纬网线宽：按瓦片 zoom 级换算为屏幕恒定 ~1.2px
-/// （merc 瓦片宽 / 2^z；视口半宽约 2.5 瓦片 ≈ 400px）
-pub fn graticule_width_for_zoom(z: u8) -> f32 {
-    const TILE_MERCATOR_WIDTH: f64 = 40_075_016.7;
-    ((TILE_MERCATOR_WIDTH / (1u64 << z.min(20)) as f64) / 400.0 * 1.2) as f32
-}
-
-/// 静态模式：按初始视口（数据外接框高 / 900px）换算
-pub fn graticule_width_for_bounds(bounds_height_m: f32) -> f32 {
-    (bounds_height_m / 900.0 * 1.2).max(4.0)
 }
 
 /// 场景中的一层：颜色 + z 序 + 网格（可在任务线程构建，主线程生成实体）
@@ -287,7 +320,7 @@ pub struct MapLayer {
 
 /// 构建全部地图层并合并为单个顶点色网格（纯函数，可在任务线程调用）。
 /// 层序即绘制序（后追加覆盖先追加），替代多实体的 z 排序。
-pub fn build_map_mesh(map: &MapData, proj: &Projection, graticule_width_m: f32, grat_step_deg: f64) -> Mesh {
+pub fn build_map_mesh(map: &MapData) -> Mesh {
     let mut acc = MeshAccumulator::default();
     let mut layers: Vec<MapLayer> = Vec::new();
 
@@ -319,9 +352,6 @@ pub fn build_map_mesh(map: &MapData, proj: &Projection, graticule_width_m: f32, 
     push_lines(|k| *k == LineKind::Road(crate::osm::RoadClass::Minor), palette::ROAD_MINOR, 5.3, &mut layers);
     push_lines(|k| *k == LineKind::Road(crate::osm::RoadClass::Mid), palette::ROAD_MID, 5.4, &mut layers);
     push_lines(|k| *k == LineKind::Road(crate::osm::RoadClass::Major), palette::ROAD_MAJOR, 5.5, &mut layers);
-
-    let grat = graticule_lines(map, proj, grat_step_deg, graticule_width_m);
-    layers.push(MapLayer { color: palette::GRATICULE, z: 8.0, mesh: line_mesh(&grat) });
 
     for layer in &layers {
         acc.append_mesh(&layer.mesh, layer.color);
@@ -509,25 +539,9 @@ mod tests {
     }
 
     #[test]
-    fn graticule_width_scales() {
-        // z13 → ~14.7m；z6 → ~1880m；每级恒定 ~1.2 屏幕像素
-        let w13 = graticule_width_for_zoom(13);
-        let w6 = graticule_width_for_zoom(6);
-        assert!((w13 - 14.7).abs() < 0.5, "z13 线宽 {w13}");
-        assert!((w6 - 1879.9).abs() < 5.0, "z6 线宽 {w6}");
-        assert!((w13 - graticule_width_for_zoom(14) * 2.0).abs() < 0.5, "相邻级应差 2 倍");
-        assert!((graticule_width_for_bounds(13_600.0) - 18.13).abs() < 0.1);
-    }
-
-    #[test]
     fn graticule_produces_lines() {
-        let map = MapData {
-            min: Vec2::new(-5000.0, -5000.0),
-            max: Vec2::new(5000.0, 5000.0),
-            ..Default::default()
-        };
         let proj = Projection::new(21.35, -157.92);
-        let lines = graticule_lines(&map, &proj, 0.05, 15.0);
+        let lines = graticule_lines_region(&proj, 21.30, -157.98, 21.40, -157.87, 0.05, 15.0);
         assert!(!lines.is_empty(), "应生成经纬网线");
         assert!(lines.iter().all(|l| l.pts.len() == 2));
     }

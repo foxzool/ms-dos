@@ -19,7 +19,7 @@ use bevy::window::{PrimaryWindow, Window};
 use crate::camera::CameraRig;
 use crate::geo::Projection;
 use crate::globe::DataRing;
-use crate::map_render::{build_map_mesh, graticule_step_for_view, graticule_width_for_zoom, spawn_map_layers_at, white_vertex_material};
+use crate::map_render::{build_map_mesh, spawn_map_layers_at, white_vertex_material};
 use crate::mvt::{decode_mvt, mvt_to_mapdata};
 use crate::MapCtx;
 
@@ -61,12 +61,6 @@ pub fn tile_bbox_latlon(k: TileKey) -> (f64, f64, f64, f64) {
     let south =
         (std::f64::consts::PI * (1.0 - 2.0 * (k.y + 1) as f64 / n)).sinh().atan().to_degrees();
     (south, west, north, east)
-}
-
-/// 瓦片中心经纬度
-pub fn tile_center_latlon(k: TileKey) -> (f64, f64) {
-    let (s, w, n, e) = tile_bbox_latlon(k);
-    ((s + n) * 0.5, (w + e) * 0.5)
 }
 
 /// 覆盖经纬度范围的全部瓦片键
@@ -331,11 +325,7 @@ pub fn build_tile_payload(k: TileKey, mvt_bytes: &[u8]) -> Result<TilePayload, S
     let half = (max - min) * 0.5;
     map.min = -half;
     map.max = half;
-    let (clat, clon) = tile_center_latlon(k);
-    let local_proj = Projection::new(clat, clon);
-    // 视口高（米）：该瓦片级的典型视高 = 瓦片宽 × (900/4)（地图态按 ~4 瓦片宽视口估算）
-    let view_m = (40_075_016.7 / (1u64 << k.z.min(20)) as f64) as f32 * 225.0;
-    let mesh = build_map_mesh(&map, &local_proj, graticule_width_for_zoom(k.z), graticule_step_for_view(view_m, 900.0));
+    let mesh = build_map_mesh(&map);
     Ok(TilePayload { mesh, origin: center, n_polys, n_lines })
 }
 
@@ -572,7 +562,7 @@ mod tests {
         let (s, w, n, e) = tile_bbox_latlon(k);
         assert!(s < 21.31 && 21.31 < n, "lat 不在瓦片内: {s}..{n}");
         assert!(w < -157.86 && -157.86 < e, "lon 不在瓦片内: {w}..{e}");
-        let (clat, clon) = tile_center_latlon(k);
+        let (clat, clon) = ((s + n) * 0.5, (w + e) * 0.5);
         let (x2, y2) = xy_of(clat, clon, 13);
         assert_eq!((x2, y2), (k.x, k.y));
     }

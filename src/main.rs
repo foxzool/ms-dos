@@ -284,6 +284,8 @@ fn main() {
             satellites::sat_stream_system,
         )
         .add_systems(Update, globe::map_takeoff.run_if(in_state(globe::AppState::Map)))
+        .init_resource::<map_render::GraticuleState>()
+        .add_systems(Update, map_render::graticule_system.run_if(in_state(globe::AppState::Map)))
         .add_systems(
             Update,
             (timeline::timeline_system, timeline::timeline_hit_zone).chain(),
@@ -489,12 +491,7 @@ fn setup_world(
             &mut commands,
             &mut meshes,
             &mut materials,
-            map_render::build_map_mesh(
-                &map,
-                &local,
-                map_render::graticule_width_for_bounds(map.max.y - map.min.y),
-                map_render::graticule_step_for_view(map.max.y - map.min.y, 900.0),
-            ),
+            map_render::build_map_mesh(&map),
             origin,
             &shared,
         );
