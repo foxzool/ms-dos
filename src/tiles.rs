@@ -23,6 +23,16 @@ use crate::map_render::{build_map_mesh, spawn_map_layers_at, white_vertex_materi
 use crate::mvt::{decode_mvt, mvt_to_mapdata};
 use crate::MapCtx;
 
+/// wasm 端诊断日志（eprintln 不进浏览器 console）
+macro_rules! wlog {
+    ($($arg:tt)*) => {
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&format!($($arg)*).into());
+        #[cfg(not(target_arch = "wasm32"))]
+        eprintln!($($arg)*);
+    };
+}
+
 const TILEJSON_URL: &str = "https://tiles.openfreemap.org/planet";
 const FALLBACK_TEMPLATE: &str =
     "https://tiles.openfreemap.org/planet/20260906_080001_pt/{z}/{x}/{y}.pbf";
@@ -455,9 +465,9 @@ pub fn tile_stream_system(
                     payload.origin,
                     &shared,
                 );
-                eprintln!(
-                    "[tile {}/{}/{}] 加载完成: {} 面 / {} 线",
-                    k.z, k.x, k.y, payload.n_polys, payload.n_lines
+                wlog!(
+                    "[tile {}/{}/{}] 加载完成: {} 面 / {} 线, origin {:?}",
+                    k.z, k.x, k.y, payload.n_polys, payload.n_lines, payload.origin
                 );
                 cache.tiles.insert(k, TileStatus::Loaded(spawned));
                 cache.lru.push_back(k);
@@ -471,7 +481,7 @@ pub fn tile_stream_system(
                 }
             }
             Err(err) => {
-                eprintln!("[tile {}/{}/{}] 失败（20s 后重试）: {err}", k.z, k.x, k.y);
+                wlog!("[tile {}/{}/{}] 失败（20s 后重试）: {err}", k.z, k.x, k.y);
                 cache.failed += 1;
                 cache.tiles.insert(
                     k,
