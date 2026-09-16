@@ -19,7 +19,7 @@ use bevy::window::{PrimaryWindow, Window};
 use crate::camera::CameraRig;
 use crate::geo::Projection;
 use crate::globe::DataRing;
-use crate::map_render::{build_map_mesh, graticule_width_for_zoom, spawn_map_layers_at, white_vertex_material};
+use crate::map_render::{build_map_mesh, graticule_step_for_view, graticule_width_for_zoom, spawn_map_layers_at, white_vertex_material};
 use crate::mvt::{decode_mvt, mvt_to_mapdata};
 use crate::MapCtx;
 
@@ -333,7 +333,9 @@ pub fn build_tile_payload(k: TileKey, mvt_bytes: &[u8]) -> Result<TilePayload, S
     map.max = half;
     let (clat, clon) = tile_center_latlon(k);
     let local_proj = Projection::new(clat, clon);
-    let mesh = build_map_mesh(&map, &local_proj, graticule_width_for_zoom(k.z));
+    // 视口高（米）：该瓦片级的典型视高 = 瓦片宽 × (900/4)（地图态按 ~4 瓦片宽视口估算）
+    let view_m = (40_075_016.7 / (1u64 << k.z.min(20)) as f64) as f32 * 225.0;
+    let mesh = build_map_mesh(&map, &local_proj, graticule_width_for_zoom(k.z), graticule_step_for_view(view_m, 900.0));
     Ok(TilePayload { mesh, origin: center, n_polys, n_lines })
 }
 

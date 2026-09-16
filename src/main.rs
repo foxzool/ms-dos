@@ -489,7 +489,12 @@ fn setup_world(
             &mut commands,
             &mut meshes,
             &mut materials,
-            map_render::build_map_mesh(&map, &local, map_render::graticule_width_for_bounds(map.max.y - map.min.y)),
+            map_render::build_map_mesh(
+                &map,
+                &local,
+                map_render::graticule_width_for_bounds(map.max.y - map.min.y),
+                map_render::graticule_step_for_view(map.max.y - map.min.y, 900.0),
+            ),
             origin,
             &shared,
         );

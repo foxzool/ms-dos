@@ -255,6 +255,16 @@ pub fn graticule_lines(map: &MapData, proj: &Projection, step_deg: f64, width_m:
     lines
 }
 
+/// 经纬网步长：按视距自适应（目标屏幕间距 ~110px），
+/// 度数取整到标准系列——避免低视距时 0.05° 固定网格密集成一片（Cesium 默认甚至不显示经纬网）。
+/// `bounds_m` 为视口高（米），`bounds_h_px` 为视口像素高。
+pub fn graticule_step_for_view(bounds_m: f32, bounds_h_px: f32) -> f64 {
+    const STEPS: [f64; 9] = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0];
+    // 屏幕间距 110px 对应的米数 → 近似度数（经度方向）
+    let want_deg = (bounds_m / bounds_h_px.max(1.0) * 110.0) as f64 / 111_320.0;
+    STEPS.iter().copied().find(|&s| s >= want_deg).unwrap_or(5.0)
+}
+
 /// 经纬网线宽：按瓦片 zoom 级换算为屏幕恒定 ~1.2px
 /// （merc 瓦片宽 / 2^z；视口半宽约 2.5 瓦片 ≈ 400px）
 pub fn graticule_width_for_zoom(z: u8) -> f32 {
@@ -277,7 +287,7 @@ pub struct MapLayer {
 
 /// 构建全部地图层并合并为单个顶点色网格（纯函数，可在任务线程调用）。
 /// 层序即绘制序（后追加覆盖先追加），替代多实体的 z 排序。
-pub fn build_map_mesh(map: &MapData, proj: &Projection, graticule_width_m: f32) -> Mesh {
+pub fn build_map_mesh(map: &MapData, proj: &Projection, graticule_width_m: f32, grat_step_deg: f64) -> Mesh {
     let mut acc = MeshAccumulator::default();
     let mut layers: Vec<MapLayer> = Vec::new();
 
@@ -310,7 +320,7 @@ pub fn build_map_mesh(map: &MapData, proj: &Projection, graticule_width_m: f32) 
     push_lines(|k| *k == LineKind::Road(crate::osm::RoadClass::Mid), palette::ROAD_MID, 5.4, &mut layers);
     push_lines(|k| *k == LineKind::Road(crate::osm::RoadClass::Major), palette::ROAD_MAJOR, 5.5, &mut layers);
 
-    let grat = graticule_lines(map, proj, 0.05, graticule_width_m);
+    let grat = graticule_lines(map, proj, grat_step_deg, graticule_width_m);
     layers.push(MapLayer { color: palette::GRATICULE, z: 8.0, mesh: line_mesh(&grat) });
 
     for layer in &layers {
@@ -484,6 +494,18 @@ mod tests {
         println!("strip: v={v} i={i} | legacy: v={old_v} i={old_i} | 顶点 {}% 索引 {}%",
             v * 100 / old_v, i * 100 / old_i);
         assert!(v < old_v && i < old_i);
+    }
+
+    #[test]
+    fn graticule_step_adapts_to_view() {
+        // 高视距（粗略全球）：步长大
+        assert_eq!(graticule_step_for_view(40_000_000.0, 900.0), 5.0);
+        // 战术视距（~220km 视高）：0.25°（屏幕间距 ~100px，不再 0.05° 密集网格）
+        assert_eq!(graticule_step_for_view(223_403.0, 900.0), 0.25);
+        // 近距：0.05°
+        assert_eq!(graticule_step_for_view(30_000.0, 900.0), 0.05);
+        // 更近：0.02/0.01
+        assert_eq!(graticule_step_for_view(8_000.0, 900.0), 0.01);
     }
 
     #[test]
