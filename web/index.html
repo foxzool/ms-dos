@@ -18,8 +18,8 @@
 <div id="loading">LOADING MIAOSUAN DOS…</div>
 <script type="module">
   // 动态导入 + 重试：js/wasm 分发的瞬时网络错误（连接重置等）自动恢复
-  const JS = '/msdos.140a21ac.js';
-  const WASM = '/msdos_bg.140a21ac.wasm.gz';
+  const JS = '/msdos.7c90ee3a.js';
+  const WASM = '/msdos_bg.7c90ee3a.wasm.gz';
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   async function withRetry(label, fn, tries = 4) {
     for (let i = 1; ; i++) {

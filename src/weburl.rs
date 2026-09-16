@@ -26,7 +26,13 @@ pub enum InitialView {
     Globe { lat: f32, lon: f32, alt_m: f32 },
 }
 
-/// 解析 hash（如 `#map=21.355,-157.925,17.8`）
+/// 经度归一化到 [-180, 180)：地球是圆的，-236.7 与 123.3 是同一个地方
+pub fn wrap_lon(lon: f64) -> f64 {
+    let l = ((lon + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+    if l == 180.0 { -180.0 } else { l }
+}
+
+/// 解析 hash（如 `#map=21.355,-157.925,17.8`）；超界经度自动回绕而不是拒绝
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn parse_hash(s: &str) -> Option<InitialView> {
     let body = s.trim_start_matches('#');
@@ -38,10 +44,10 @@ pub fn parse_hash(s: &str) -> Option<InitialView> {
             let lon: f64 = it.next()?.parse().ok()?;
             let alt: f32 = it.next()?.parse().ok()?;
             // 视高合法范围：约 100m（近观）… 2,000km（全球缩放）
-            if !(-85.0..=85.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) || !(100.0..=2_000_000.0).contains(&alt) {
+            if !(-85.0..=85.0).contains(&lat) || !(100.0..=2_000_000.0).contains(&alt) {
                 return None;
             }
-            Some(InitialView::Map { lat, lon, alt_m: alt })
+            Some(InitialView::Map { lat, lon: wrap_lon(lon), alt_m: alt })
         }
         "globe" => {
             let mut it = rest.split(',');
@@ -52,10 +58,10 @@ pub fn parse_hash(s: &str) -> Option<InitialView> {
                 Some(v) => v.parse().ok()?,
                 None => 12_000_000.0,
             };
-            if !(-85.0..=85.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) || !(10_000.0..=20_000_000.0).contains(&alt) {
+            if !(-85.0..=85.0).contains(&lat) || !(10_000.0..=20_000_000.0).contains(&alt) {
                 return None;
             }
-            Some(InitialView::Globe { lat, lon, alt_m: alt })
+            Some(InitialView::Globe { lat, lon: wrap_lon(lon as f64) as f32, alt_m: alt })
         }
         _ => None,
     }
@@ -64,13 +70,13 @@ pub fn parse_hash(s: &str) -> Option<InitialView> {
 /// 地图态 hash（纬度 5 位 ≈ 1m；zoom = 视高米）
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn format_map(lat: f64, lon: f64, alt_m: f32) -> String {
-    format!("#map={lat:.5},{lon:.5},{alt_m:.0}")
+    format!("#map={lat:.5},{:.5},{alt_m:.0}", wrap_lon(lon))
 }
 
 /// 地球态 hash（zoom = 离地表高度米，缺省全球）
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn format_globe(lat: f32, lon: f32, alt_m: f32) -> String {
-    format!("#globe={lat:.3},{lon:.3},{alt_m:.0}")
+    format!("#globe={lat:.3},{:.3},{alt_m:.0}", wrap_lon(lon as f64))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -142,6 +148,32 @@ pub fn sync_url_system(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn sync_url_system() {}
+
+#[cfg(test)]
+mod wrap_tests {
+    use super::*;
+
+    #[test]
+    fn longitude_wraps() {
+        assert!((wrap_lon(-236.71547) - 123.28453).abs() < 1e-9);
+        assert!((wrap_lon(190.0) - (-170.0)).abs() < 1e-9);
+        assert!((wrap_lon(180.0) - (-180.0)).abs() < 1e-9);
+        assert!((wrap_lon(-157.925) - (-157.925)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_hash_wraps_out_of_range_lon() {
+        // 此前直接拒绝（返回 None → 视图回退默认地球态，地图不出现）
+        match parse_hash("#map=30.72470,-236.71547,124704") {
+            Some(InitialView::Map { lat, lon, alt_m }) => {
+                assert!((lat - 30.7247).abs() < 1e-9);
+                assert!((lon - 123.28453).abs() < 1e-9, "lon 应回绕到 123.28，实际 {lon}");
+                assert!((alt_m - 124_704.0).abs() < 1.0);
+            }
+            _ => panic!("超界经度应回绕而不是拒绝"),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
