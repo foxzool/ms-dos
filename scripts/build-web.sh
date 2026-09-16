@@ -28,7 +28,7 @@ mv web/msdos_bg.wasm.gz "web/msdos_bg.$HASH.wasm.gz"
 # 曾导致部署后用户长时间停留在旧逻辑
 mv web/msdos.js "web/msdos.$HASH.js"
 # 替换 index.html 中任意旧 hash/旧格式引用（支持重复构建）
-sed -i '' -E "s#msdos_bg\.[a-z0-9.]+\.wasm(\.gz)?#msdos_bg.$HASH.wasm.gz#g; s#(\./)?msdos(\.[a-z0-9]+)?\.js(\?v=[a-z0-9.]*)?#/msdos.$HASH.js#g" web/index.html
+sed -i '' -E "s#/*msdos_bg\.[a-z0-9.]+\.wasm(\.gz)?#/msdos_bg.$HASH.wasm.gz#g; s#\.?/*msdos(\.[a-z0-9]+)?\.js(\?v=[a-z0-9.]*)?#/msdos.$HASH.js#g" web/index.html
 
 if [[ "${1:-}" == "--deploy" ]]; then
   echo "==> 部署到 Cloudflare Pages"

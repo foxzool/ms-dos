@@ -17,18 +17,34 @@
 <div id="app"><canvas id="msdos-canvas"></canvas></div>
 <div id="loading">LOADING MIAOSUAN DOS…</div>
 <script type="module">
-  import init from '///msdos.57c65140.js';
+  // 动态导入 + 重试：js/wasm 分发的瞬时网络错误（连接重置等）自动恢复
+  const JS = '/msdos.ad15ce55.js';
+  const WASM = '/msdos_bg.ad15ce55.wasm.gz';
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function withRetry(label, fn, tries = 4) {
+    for (let i = 1; ; i++) {
+      try { return await fn(); }
+      catch (e) {
+        if (i >= tries) throw e;
+        console.warn(label + ' 加载失败，重试 ' + i + ': ' + e);
+        await sleep(800 * i);
+      }
+    }
+  }
   // wasm 以 gzip 预压缩分发（绕过 CF Pages 25MiB 单文件限制），浏览器端解压
   async function boot() {
-    const resp = await fetch('./msdos_bg.57c65140.wasm.gz');
-    if (!resp.ok) throw new Error('wasm 下载失败: HTTP ' + resp.status);
-    const ds = new DecompressionStream('gzip');
-    const inflated = await new Response(resp.body.pipeThrough(ds)).arrayBuffer();
-    await init(inflated);
+    const init = await withRetry('js', () => import(JS));
+    const buf = await withRetry('wasm', async () => {
+      const resp = await fetch(WASM);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const ds = new DecompressionStream('gzip');
+      return new Response(resp.body.pipeThrough(ds)).arrayBuffer();
+    });
+    await init.default(buf);
     document.getElementById('loading').style.display = 'none';
   }
   boot().catch(e => {
-    document.getElementById('loading').textContent = '加载失败: ' + e;
+    document.getElementById('loading').textContent = '加载失败: ' + e + '（网络抖动，刷新重试）';
     console.error(e);
   });
   // 阻止右键菜单弹出（右键是“落入地图”指令）
