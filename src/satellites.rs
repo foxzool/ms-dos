@@ -212,6 +212,45 @@ impl SatLayer {
 }
 
 /// 球面标记的世界半径：屏幕恒定像素（与 globe 标记同族公式）
+/// 在 XY 平面追加一个矩形（billboard 图标部件）
+fn push_rect(pos: &mut Vec<[f32; 3]>, idx: &mut Vec<u32>, x0: f32, y0: f32, x1: f32, y1: f32) {
+    let base = pos.len() as u32;
+    pos.extend_from_slice(&[
+        [x0, y0, 0.0],
+        [x1, y0, 0.0],
+        [x1, y1, 0.0],
+        [x0, y1, 0.0],
+    ]);
+    idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+/// MIL-STD-2525D 语义的卫星剪影（中央本体 + 左右太阳翼），XY 平面单位框内
+fn satellite_icon_mesh() -> Mesh {
+    let mut pos: Vec<[f32; 3]> = Vec::new();
+    let mut idx: Vec<u32> = Vec::new();
+    push_rect(&mut pos, &mut idx, -0.09, -0.17, 0.09, 0.17); // 本体
+    push_rect(&mut pos, &mut idx, -0.5, -0.08, -0.16, 0.08); // 左翼
+    push_rect(&mut pos, &mut idx, 0.16, -0.08, 0.5, 0.08); // 右翼
+    let mut m = Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::default());
+    m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+    m.insert_indices(bevy::render::mesh::Indices::U32(idx));
+    m
+}
+
+/// ISS 空间站剪影（横桁架 + 中央模块 + 左右成对翼板）
+fn iss_icon_mesh() -> Mesh {
+    let mut pos: Vec<[f32; 3]> = Vec::new();
+    let mut idx: Vec<u32> = Vec::new();
+    push_rect(&mut pos, &mut idx, -0.5, -0.035, 0.5, 0.035); // 主桁架
+    push_rect(&mut pos, &mut idx, -0.06, -0.15, 0.06, 0.15); // 居住模块
+    push_rect(&mut pos, &mut idx, -0.42, -0.15, -0.14, -0.05); // 左下翼
+    push_rect(&mut pos, &mut idx, 0.14, 0.05, 0.42, 0.15); // 右上翼
+    let mut m = Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::default());
+    m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+    m.insert_indices(bevy::render::mesh::Indices::U32(idx));
+    m
+}
+
 fn sat_marker_radius(cam_distance: f32, px: f32, viewport_h: f32) -> f32 {
     (cam_distance * px * 2.0 * (crate::globe::GLOBE_FOV * 0.5).tan() / viewport_h.max(1.0)).max(1.0)
 }
@@ -266,6 +305,8 @@ pub fn sat_stream_system(
     // 首次有数据：生成实体
     if q_markers.is_empty() {
         let dot = meshes.add(Mesh::from(bevy::math::primitives::Sphere::new(1.0)));
+        let icon_std = meshes.add(satellite_icon_mesh());
+        let icon_iss = meshes.add(iss_icon_mesh());
         let mat_iss = materials.add(StandardMaterial {
             base_color: bevy::color::Color::srgb_u8(255, 224, 109),
             unlit: true,
@@ -281,7 +322,7 @@ pub fn sat_stream_system(
         for (idx, s) in set.sats.iter().enumerate() {
             let is_iss = Some(idx) == set.iss_index;
             commands.spawn((
-                bevy::mesh::Mesh3d(dot.clone()),
+                bevy::mesh::Mesh3d(if is_iss { icon_iss.clone() } else { icon_std.clone() }),
                 MeshMaterial3d(if is_iss { mat_iss.clone() } else { mat_std.clone() }),
                 Transform::default(),
                 Visibility::Visible,
@@ -314,10 +355,13 @@ pub fn sat_stream_system(
     let r = sat_marker_radius(cam_dist, 7.0, vp_h);
     let orbit_r = sat_marker_radius(cam_dist, 2.5, vp_h);
     let label_show = layer.visible && cam_dist < GLOBE_RADIUS * 1.6;
+    let cam_up = cam_t.up();
     for (mut t, m) in &mut q_markers {
         if let Some(p) = set.sats[m.idx].position_at(unix) {
             t.translation = p;
-            t.scale = Vec3::splat(r);
+            t.scale = Vec3::splat(r * 1.6);
+            // 剪影图标需始终面向相机（billboard）；up 取相机上方向避免极区退化
+            t.look_at(cam_t.translation, cam_up);
         }
     }
     for (mut t, mut vis, mut text) in &mut q_labels {
