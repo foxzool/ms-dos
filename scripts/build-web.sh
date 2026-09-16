@@ -20,12 +20,15 @@ wasm-opt -Oz \
 mv web/msdos_bg.wasm.opt web/msdos_bg.wasm
 
 echo "==> 内容寻址文件名"
-rm -f web/msdos_bg.*.wasm web/msdos_bg.*.wasm.gz web/msdos_bg.wasm.d.ts web/msdos.d.ts
+rm -f web/msdos_bg.*.wasm web/msdos_bg.*.wasm.gz web/msdos_bg.wasm.d.ts web/msdos.[0-9a-f]*.js
 gzip -9 -f web/msdos_bg.wasm
 HASH=$(md5 -q web/msdos_bg.wasm.gz | cut -c1-8)
 mv web/msdos_bg.wasm.gz "web/msdos_bg.$HASH.wasm.gz"
-# 替换 index.html 中任意旧 hash（支持重复构建）
-sed -i '' -E "s#msdos_bg\.[a-z0-9.]+\.wasm(\.gz)?#msdos_bg.$HASH.wasm.gz#g; s#msdos.js\?v=[a-z0-9.]*#msdos.js?v=$HASH#g" web/index.html
+# js 同样内容寻址：浏览器对 js 的缓存头不可靠（CF Pages 实测返回 max-age=14400），
+# 曾导致部署后用户长时间停留在旧逻辑
+mv web/msdos.js "web/msdos.$HASH.js"
+# 替换 index.html 中任意旧 hash/旧格式引用（支持重复构建）
+sed -i '' -E "s#msdos_bg\.[a-z0-9.]+\.wasm(\.gz)?#msdos_bg.$HASH.wasm.gz#g; s#(\./)?msdos(\.[a-z0-9]+)?\.js(\?v=[a-z0-9.]*)?#/msdos.$HASH.js#g" web/index.html
 
 if [[ "${1:-}" == "--deploy" ]]; then
   echo "==> 部署到 Cloudflare Pages"
