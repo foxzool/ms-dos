@@ -126,7 +126,7 @@ curl -s -o data/pearl_harbor.osm --data-urlencode "data@query.overpassql" \
 | 内容 | 许可 | 来源 |
 | --- | --- | --- |
 | 地图数据（运行时瓦片） | [ODbL](https://opendatacommons.org/licenses/odbl/) | © OpenStreetMap contributors；瓦片来自 [OpenFreeMap](https://openfreemap.org)（© OpenMapTiles） |
-| 底图球贴图 `assets/earth_2048.jpg` | 公有领域 | Natural Earth III by Tom Patterson ([shadedrelief.com](https://www.shadedrelief.com))，经 [three.js](https://github.com/mrdoob/three.js) examples 分发；[Natural Earth 条款](https://www.naturalearthdata.com/about/terms-of-use/) |
+| 底图球贴图 `assets/earth_2048.jpg` | 公有领域（NASA 开放数据） | 由 NASA GIBS `BlueMarble_ShadedRelief_Bathymetry` z3 全球瓦片离线拼贴并重投影至 equirectangular 生成（与瓦片流同源，保证露底时影像一致）；[GIBS 使用指引](https://nasa-gibs.github.io/gibs-api-docs/access-basics/) |
 | 地球贴图瓦片（运行时） | 公有领域（NASA 政策） | [NASA GIBS](https://nasa-gibs.github.io/gibs-api-docs/) `BlueMarble_ShadedRelief_Bathymetry`，z0-8 WMTS/XYZ |
 | docs/ 截图 | 本项目 MIT（含上述公有领域贴图与 ODbL 数据的可视化，署名如下） | 自渲染 |
 | Rust 依赖（462 个） | MIT / Apache-2.0 / Unicode-3.0 / Zlib / ISC / BSD / CDLA-Permissive-2.0 等宽松许可，无 copyleft 组件 | `cargo metadata` 审计 |
