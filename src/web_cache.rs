@@ -98,3 +98,69 @@ mod tests {
         assert_ne!(gibs_cache_key(4, 9, 5), ofm_cache_key(4, 9, 5));
     }
 }
+
+/// 按天缓存的高频小数据（TLE）：缓存名带 UTC 日期，隔天自然失效；
+/// 旧的按天缓存会在下次调用时被清理（TLE 数据每天更新，旧数据无保留价值）。
+#[cfg(target_arch = "wasm32")]
+pub async fn cached_fetch_daily(kind: &str, url: &str) -> Result<Vec<u8>, String> {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+
+    let epoch_day = (js_sys::Date::now() / 86_400_000.0) as i64;
+    let today = format!("msdos-{kind}-d{epoch_day}");
+    let window = web_sys::window().ok_or("无 window 对象")?;
+    let caches = window.caches().map_err(|_| "无 CacheStorage")?;
+
+    // 清理旧日缓存（失败容忍）
+    if let Ok(keys_val) = JsFuture::from(caches.keys()).await {
+        let names = js_sys::Array::from(&keys_val);
+        for i in 0..names.length() {
+            if let Some(n) = names.get(i).as_string() {
+                if n.starts_with("msdos-") && n.contains("-d") && n != today {
+                    let _ = JsFuture::from(caches.delete(&n)).await;
+                }
+            }
+        }
+    }
+
+    let key = format!("https://msdos.cache/{kind}");
+    // 查当天缓存
+    if let Ok(c) = JsFuture::from(caches.open(&today)).await {
+        if let Ok(cache) = c.dyn_into::<web_sys::Cache>() {
+            if let Ok(hit) = JsFuture::from(cache.match_with_str(&key)).await {
+                if !hit.is_undefined() {
+                    if let Ok(resp) = hit.dyn_into::<web_sys::Response>() {
+                        if let Ok(buf) = JsFuture::from(resp.array_buffer().map_err(|e| format!("{e:?}"))?).await {
+                            let bytes = js_sys::Uint8Array::new(&buf).to_vec();
+                            if !bytes.is_empty() {
+                                return Ok(bytes);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // 网络
+    let resp_val = JsFuture::from(window.fetch_with_str(url))
+        .await
+        .map_err(|e| format!("网络失败: {e:?}"))?;
+    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "响应类型异常")?;
+    if !resp.ok() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    let buf = JsFuture::from(resp.array_buffer().map_err(|e| format!("{e:?}"))?)
+        .await
+        .map_err(|e| format!("读取失败: {e:?}"))?;
+    let bytes = js_sys::Uint8Array::new(&buf).to_vec();
+    // 写回（失败容忍）
+    if let Ok(c) = JsFuture::from(caches.open(&today)).await {
+        if let Ok(cache) = c.dyn_into::<web_sys::Cache>() {
+            let mut body = bytes.clone();
+            if let Ok(stored) = web_sys::Response::new_with_opt_u8_array(Some(&mut body)) {
+                let _ = JsFuture::from(cache.put_with_str(&key, &stored)).await;
+            }
+        }
+    }
+    Ok(bytes)
+}

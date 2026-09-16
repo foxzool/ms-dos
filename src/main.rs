@@ -281,7 +281,7 @@ fn main() {
         )
         .add_systems(
             Update,
-            satellites::sat_stream_system.run_if(in_state(globe::AppState::Globe)),
+            satellites::sat_stream_system,
         )
         .add_systems(Update, globe::map_takeoff.run_if(in_state(globe::AppState::Map)))
         .add_systems(

@@ -145,21 +145,10 @@ async fn fetch_tle_group(group: &str) -> Result<String, String> {
 
 #[cfg(target_arch = "wasm32")]
 async fn fetch_tle_group(group: &str) -> Result<String, String> {
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen_futures::JsFuture;
     let url = format!("{TLE_ENDPOINT}?GROUP={group}&FORMAT=tle");
-    let window = web_sys::window().ok_or("无 window")?;
-    let resp_val = JsFuture::from(window.fetch_with_str(&url))
-        .await
-        .map_err(|e| format!("网络失败: {e:?}"))?;
-    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "响应类型异常")?;
-    if !resp.ok() {
-        return Err(format!("HTTP {}", resp.status()));
-    }
-    let text = JsFuture::from(resp.text().map_err(|e| format!("{e:?}"))?)
-        .await
-        .map_err(|e| format!("读取失败: {e:?}"))?;
-    text.as_string().ok_or_else(|| "非文本".to_string())
+    // 按天缓存：TLE 每日更新，CelesTrak 对高频请求限流（实测 403）
+    let bytes = crate::web_cache::cached_fetch_daily("tle", &url).await?;
+    String::from_utf8(bytes).map_err(|e| format!("非 UTF-8: {e}"))
 }
 
 pub async fn fetch_satellite_set() -> Option<SatelliteSet> {
@@ -262,6 +251,7 @@ pub fn sat_stream_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut layer: ResMut<SatLayer>,
+    app: Res<bevy::state::state::State<crate::globe::AppState>>,
     clock: Res<SimClock>,
     cams: Query<&Transform, With<GlobeCamera>>,
     window: Query<&bevy::window::Window, bevy::ecs::query::With<bevy::window::PrimaryWindow>>,
@@ -269,9 +259,24 @@ pub fn sat_stream_system(
     keys: Res<ButtonInput<KeyCode>>,
     mut q_markers: Query<(&mut Transform, &SatMarker), (Without<SatLabel>, Without<OrbitDot>, Without<GlobeCamera>)>,
     mut q_labels: Query<(&mut Transform, &mut Visibility, &mut Text2d), (With<SatLabel>, Without<SatMarker>, Without<GlobeCamera>)>,
-    mut q_orbit: Query<(&mut Transform, &OrbitDot), (Without<SatMarker>, Without<SatLabel>, Without<GlobeCamera>)>,
+    mut q_orbit: Query<(&mut Transform, &mut Visibility, &OrbitDot), (Without<SatMarker>, Without<SatLabel>, Without<GlobeCamera>)>,
     mut q_vis: Query<&mut Visibility, (With<SatMarker>, Without<SatLabel>, Without<OrbitDot>)>,
 ) {
+    // ---- 地图态（OSM）下卫星层整体关闭：3D 图标本就不可见，
+    // 但 ISS 的 Text2d 标签走 2D 管线，必须显式隐藏防泄漏到地图上 ----
+    if *app.get() != crate::globe::AppState::Globe {
+        for mut v in &mut q_vis {
+            *v = Visibility::Hidden;
+        }
+        for (_, mut v, _) in &mut q_labels {
+            *v = Visibility::Hidden;
+        }
+        for (_, mut v, _) in &mut q_orbit {
+            *v = Visibility::Hidden;
+        }
+        return;
+    }
+
     // ---- S 键开关 ----
     if keys.just_pressed(KeyCode::KeyS) {
         layer.visible = !layer.visible;
@@ -354,7 +359,10 @@ pub fn sat_stream_system(
     let cam_dist = cam_t.translation.length();
     let r = sat_marker_radius(cam_dist, 7.0, vp_h);
     let orbit_r = sat_marker_radius(cam_dist, 2.5, vp_h);
-    let label_show = layer.visible && cam_dist < GLOBE_RADIUS * 1.6;
+    // 近距（接近落地阈值）时卫星层密集碍事，随视距自动淡出
+    let near_hide = GLOBE_RADIUS * 1.15;
+    let show = layer.visible && cam_dist > near_hide;
+    let label_show = show && cam_dist < GLOBE_RADIUS * 1.6;
     let cam_up = cam_t.up();
     for (mut t, m) in &mut q_markers {
         if let Some(p) = set.sats[m.idx].position_at(unix) {
@@ -375,17 +383,18 @@ pub fn sat_stream_system(
         *vis = if label_show { Visibility::Visible } else { Visibility::Hidden };
     }
     if let Some(idx) = set.iss_index {
-        for (mut t, o) in &mut q_orbit {
+        for (mut t, mut v, o) in &mut q_orbit {
             let unix_f = unix + ORBIT_SPAN_MIN * 60.0 * o.step as f64 / ORBIT_SAMPLES as f64;
             if let Some(p) = set.sats[idx].position_at(unix_f) {
                 t.translation = p;
                 t.scale = Vec3::splat(orbit_r);
             }
+            *v = if show { Visibility::Visible } else { Visibility::Hidden };
         }
     }
     // ---- 层可见性 ----
     for mut v in &mut q_vis {
-        *v = if layer.visible { Visibility::Visible } else { Visibility::Hidden };
+        *v = if show { Visibility::Visible } else { Visibility::Hidden };
     }
     let _ = time.delta();
 }
