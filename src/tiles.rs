@@ -29,9 +29,9 @@ const FALLBACK_TEMPLATE: &str =
 const TILE_MERCATOR_WIDTH: f64 = 40_075_016.7;
 
 /// 最多同时下载的瓦片数
-const MAX_INFLIGHT: usize = 4;
+const MAX_INFLIGHT: usize = 3;
 /// 两次请求之间的最小间隔（秒）
-const REQUEST_INTERVAL: f32 = 0.15;
+const REQUEST_INTERVAL: f32 = 0.3;
 /// 缓存瓦片上限（超出按 LRU 淘汰视口外的）
 const MAX_TILES: usize = 24;
 

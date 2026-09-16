@@ -26,8 +26,9 @@ const GIBS_TEMPLATE: &str = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/
 /// 近观下限：z8 ≈ 611 m/px；更近无更高源，直接放大
 const GIBS_MAX_Z: u8 = 8;
 const MAX_TILES: usize = 120; // 全球 z4 半球约 100 张；z8 视场内远少于上限
-const MAX_INFLIGHT: usize = 6;
-const REQUEST_INTERVAL: f32 = 0.1;
+// 请求强度刻意保守：GIBS/OpenFreeMap 均按 IP 限流（实测 403），高并发得不偿失
+const MAX_INFLIGHT: usize = 3;
+const REQUEST_INTERVAL: f32 = 0.3;
 
 // ---------- 球面分区网格 ----------
 

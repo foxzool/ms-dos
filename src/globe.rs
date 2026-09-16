@@ -180,6 +180,8 @@ pub fn setup_globe(
 ) {
     let earth_mat = std_materials.add(StandardMaterial {
         base_color_texture: Some(earth.0.clone()),
+        // 与 GIBS 瓦片层同款冷色 tint：瓦片缺失露出底图时色调一致，不再突兀
+        base_color: Color::srgb(0.52, 0.60, 0.72),
         unlit: true,
         cull_mode: None,
         ..default()
