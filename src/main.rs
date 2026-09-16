@@ -294,7 +294,6 @@ fn main() {
             Update,
             tiles::tile_stream_system.run_if(in_state(globe::AppState::Map)),
         )
-        .add_systems(Update, globe::sync_data_ring.run_if(in_state(globe::AppState::Globe)))
         .add_systems(Update, (apply_url_view, weburl::sync_url_system).chain());
 
     // URL 恢复视图交给 setup_world 应用（避免被默认视野覆盖）

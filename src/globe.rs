@@ -141,8 +141,6 @@ pub struct GlobeMarker {
 }
 
 /// OSM 数据区边界点
-#[derive(Component)]
-pub struct DataRingDot;
 
 /// 已加载 OSM 数据区（南、西、北、东），实时瓦片流更新，地球黄环跟随
 #[derive(Resource, Default)]
@@ -206,18 +204,6 @@ pub fn setup_globe(
     };
     commands.insert_resource(visuals);
 
-    // OSM 数据区点环：固定 96 个点，位置由 DataRing 资源（实时加载区）驱动
-    let ring_mat = std_materials.add(unlit(palette::SELECT));
-    for _ in 0..96 {
-        commands.spawn((
-            Mesh3d(dot_mesh.clone()),
-            MeshMaterial3d(ring_mat.clone()),
-            Transform::default(),
-            Visibility::Hidden,
-            DataRingDot,
-        ));
-    }
-
 
     // 相机（窗口或离屏图像目标）
     let mut cam = commands.spawn((
@@ -267,7 +253,7 @@ fn marker_world_radius(cam_distance: f32, px: f32, viewport_h: f32) -> f32 {
     (cam_distance * px * 2.0 * (GLOBE_FOV * 0.5).tan() / viewport_h.max(1.0)).max(1.0)
 }
 
-/// 同步单位标记与数据区点环（位置/像素恒定缩放/迷雾显隐/阵营配色）
+/// 同步单位标记（位置/像素恒定缩放/迷雾显隐/阵营配色）
 pub fn sync_globe_markers(
     units: Query<(&Unit, &Position)>,
     visuals: Option<Res<GlobeVisuals>>,
@@ -278,7 +264,6 @@ pub fn sync_globe_markers(
         (&GlobeMarker, &mut Transform, &mut Visibility, &mut MeshMaterial3d<StandardMaterial>),
         Without<GlobeCamera>,
     >,
-    mut ring: Query<&mut Transform, (With<DataRingDot>, Without<GlobeMarker>, Without<GlobeCamera>)>,
 ) {
     let (Ok(cam_t), Some(visuals)) = (cams.single(), visuals.as_deref()) else { return };
     let vp_h = window.single().map(|w| w.height()).unwrap_or(900.0);
@@ -302,45 +287,6 @@ pub fn sync_globe_markers(
             Side::Neutral => visuals.mat_neutral.clone(),
             Side::Blue => visuals.mat_blue.clone(),
         };
-    }
-    // 数据区点环缩放（3.5px，逐点按距相机距离）
-    for mut t in &mut ring {
-        let r = marker_world_radius(cam_t.translation.distance(t.translation), 3.5, vp_h);
-        t.scale = Vec3::splat(r);
-    }
-}
-
-/// 地球数据环：跟随实时加载区 bbox 重排
-pub fn sync_data_ring(
-    ring: Res<DataRing>,
-    mut dots: Query<(&mut Transform, &mut Visibility), With<DataRingDot>>,
-) {
-    if !ring.is_changed() {
-        return;
-    }
-    let Some((s, w, n, e)) = ring.bbox else {
-        for (_, mut vis) in &mut dots {
-            *vis = Visibility::Hidden;
-        }
-        return;
-    };
-    let per_edge = 24usize;
-    let mut pts: Vec<(f32, f32)> = Vec::with_capacity(96);
-    for i in 0..per_edge {
-        let t = i as f64 / per_edge as f64;
-        pts.push(((s + (n - s) * t) as f32, w as f32));
-        pts.push(((s + (n - s) * t) as f32, e as f32));
-        pts.push((s as f32, (w + (e - w) * t) as f32));
-        pts.push((n as f32, (w + (e - w) * t) as f32));
-    }
-    for (i, (mut t, mut vis)) in dots.iter_mut().enumerate() {
-        match pts.get(i) {
-            Some((lat, lon)) => {
-                t.translation = lat_lon_to_vec3(*lat, *lon, GLOBE_RADIUS * 1.001);
-                *vis = Visibility::Visible;
-            }
-            None => *vis = Visibility::Hidden,
-        }
     }
 }
 
