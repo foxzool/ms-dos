@@ -33,6 +33,8 @@ impl CameraRig {
 
     pub fn pan_by_screen_delta(&mut self, delta_px: Vec2) {
         self.target += Vec2::new(-delta_px.x, delta_px.y) * self.mpp;
+        self.target.x = self.target.x.clamp(-WORLD_HALF, WORLD_HALF);
+        self.target.y = self.target.y.clamp(-WORLD_HALF, WORLD_HALF);
     }
 
     /// 以光标为锚缩放，保持光标下的世界点不动
@@ -41,6 +43,8 @@ impl CameraRig {
         self.mpp = (self.mpp / factor).clamp(1.2, 1200.0);
         let now = self.world_from_screen(cursor, viewport);
         self.target += anchor - now;
+        self.target.x = self.target.x.clamp(-WORLD_HALF, WORLD_HALF);
+        self.target.y = self.target.y.clamp(-WORLD_HALF, WORLD_HALF);
     }
 }
 
@@ -99,6 +103,7 @@ fn keyboard_pan(
     if d != Vec2::ZERO {
         let speed = 900.0 * rig.mpp * time.delta().as_secs_f32();
         rig.target += d.normalize() * speed;
+        clamp_world(&mut rig);
     }
 }
 
@@ -134,7 +139,17 @@ fn apply_rig(rig: Res<CameraRig>, mut q: Query<(&mut Transform, &mut Projection)
     }
 }
 
+/// Web Mercator 世界半宽（±180°），相机目标不得越界
+pub const WORLD_HALF: f32 = 20_037_508.0;
+
 /// 供 input.rs 调用的聚焦逻辑
 pub fn focus_on(rig: &mut CameraRig, pos: Vec2) {
     rig.target = pos;
+}
+
+/// 相机目标钳制在世界范围内：平移跨过 ±180° 边界时停住，
+/// 避免瓦片请求出现负 x / 越界键（OFM 对越界瓦片返回空内容）
+pub fn clamp_world(rig: &mut CameraRig) {
+    rig.target.x = rig.target.x.clamp(-WORLD_HALF, WORLD_HALF);
+    rig.target.y = rig.target.y.clamp(-WORLD_HALF, WORLD_HALF);
 }

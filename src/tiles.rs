@@ -54,9 +54,10 @@ pub struct TileKey {
     pub y: i32,
 }
 
-/// 经纬度 → 指定 zoom 的瓦片坐标
+/// 经纬度 → 指定 zoom 的瓦片坐标（经度回绕，避免日界线另一侧产生负 x 键）
 pub fn xy_of(lat: f64, lon: f64, z: u8) -> (i32, i32) {
     let n = (1u64 << z) as f64;
+    let lon = crate::weburl::wrap_lon(lon);
     let x = ((lon + 180.0) / 360.0 * n).floor() as i32;
     let y = ((1.0 - lat.to_radians().tan().asinh() / std::f64::consts::PI) / 2.0 * n).floor() as i32;
     (x, y)
@@ -73,14 +74,29 @@ pub fn tile_bbox_latlon(k: TileKey) -> (f64, f64, f64, f64) {
     (south, west, north, east)
 }
 
-/// 覆盖经纬度范围的全部瓦片键
+/// 覆盖经纬度范围的全部瓦片键（支持跨日界线区间）
 pub fn keys_covering(lat_s: f64, lon_w: f64, lat_n: f64, lon_e: f64, z: u8) -> Vec<TileKey> {
+    let n = 1i32 << z;
     let (x0, y1) = xy_of(lat_s, lon_w, z);
     let (x1, y0) = xy_of(lat_n, lon_e, z);
     let mut keys = Vec::new();
-    for x in x0.min(x1)..=x0.max(x1) {
+    let push_col = |x: i32, keys: &mut Vec<TileKey>| {
+        let x = x.rem_euclid(n);
         for y in y0.min(y1)..=y0.max(y1) {
             keys.push(TileKey { z, x, y });
+        }
+    };
+    if x0 <= x1 {
+        for x in x0..=x1 {
+            push_col(x, &mut keys);
+        }
+    } else {
+        // 跨日界线：西段 [x0, n-1] + 东段 [0, x1]
+        for x in x0..n {
+            push_col(x, &mut keys);
+        }
+        for x in 0..=x1 {
+            push_col(x, &mut keys);
         }
     }
     keys
@@ -344,6 +360,9 @@ pub fn build_tile_payload(k: TileKey, mvt_bytes: &[u8]) -> Result<TilePayload, S
 enum TileStatus {
     Fetching(Task<Result<TilePayload, String>>),
     Loaded(crate::map_render::SpawnedMapLayer),
+    /// 瓦片内容为空（远海等）：无 mesh 实体。空 mesh 上 GPU 会触发 WebGL2
+    /// slab allocator 的 use-after-free 报错，故不 spawn。
+    Empty,
     Failed { retry_at: f32 },
 }
 
@@ -456,6 +475,16 @@ pub fn tile_stream_system(
         cache.inflight = cache.inflight.saturating_sub(1);
         match result {
             Ok(payload) => {
+                if payload.n_polys == 0 && payload.n_lines == 0 {
+                    cache.tiles.insert(k, TileStatus::Empty);
+                    cache.lru.push_back(k);
+                    let (s, w, n, e) = tile_bbox_latlon(k);
+                    cache.loaded_region = Some(match cache.loaded_region {
+                        Some((s0, w0, n0, e0)) => (s0.min(s), w0.min(w), n0.max(n), e0.max(e)),
+                        None => (s, w, n, e),
+                    });
+                    continue;
+                }
                 let shared = white_vertex_material(&mut materials);
                 let spawned = spawn_map_layers_at(
                     &mut commands,
@@ -575,6 +604,19 @@ mod tests {
         let (clat, clon) = ((s + n) * 0.5, (w + e) * 0.5);
         let (x2, y2) = xy_of(clat, clon, 13);
         assert_eq!((x2, y2), (k.x, k.y));
+    }
+
+    #[test]
+    fn covering_keys_wraps_antimeridian() {
+        // 跨日界线视野（175E..-175W）应给出两侧列而非负 x
+        let keys = keys_covering(10.0, 175.0, 20.0, -175.0, 6);
+        let n = 1i32 << 6;
+        assert!(keys.iter().all(|k| k.x >= 0 && k.x < n), "瓦片 x 应在 [0,{n})");
+        assert!(keys.iter().any(|k| k.x == 62 || k.x == 63), "应含西侧末端列");
+        assert!(keys.iter().any(|k| k.x == 0), "应含东侧起始列");
+        // 超界经度直接给 xy_of 也不产生负 x
+        let (x, _) = xy_of(10.0, -250.0, 6);
+        assert_eq!(x, 51, "-250° 应回绕到 110°E 的列 51");
     }
 
     #[test]
